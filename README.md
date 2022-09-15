@@ -2,6 +2,14 @@
 
 A framework for writing Go web apps with modest Javascript approaches.
 
+## Usage
+
+### Development
+
+To install various backend development tools, run `make install`.
+
+To run linter checks on Go files and Rego policy files, run `make lint`. To autoformat Go files and Rego policy files, run `make fmt`.
+
 ## License
 
 Copyright Prakash Lab and the Sargassum project contributors.
