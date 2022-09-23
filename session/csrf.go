@@ -23,7 +23,9 @@ func NewCSRFMiddleware(config Config, opts ...csrf.Option) func(http.Handler) ht
 	options := []csrf.Option{
 		csrf.Path(config.CookieOptions.Path),
 		csrf.Domain(config.CookieOptions.Domain),
-		csrf.MaxAge(config.CookieOptions.MaxAge),
+		// Don't set MaxAge, so that we can make the csrf cookie expire on browser close. This way, the
+		// browser doesn't write the csrf cookie to disk, and the user should never experience a CSRF
+		// error from the CSRF cookie timing out if they leave the tab open for a long time.
 		csrf.Secure(config.CookieOptions.Secure),
 		csrf.HttpOnly(config.CookieOptions.HttpOnly),
 		csrf.SameSite(sameSite),

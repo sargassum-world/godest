@@ -9,11 +9,20 @@ import (
 	"zombiezen.com/go/sqlite/sqlitex"
 )
 
+func ExecuteInsertion(conn *sqlite.Conn, query string, namedParams map[string]interface{}) error {
+	return errors.Wrap(
+		sqlitex.Execute(conn, query, &sqlitex.ExecOptions{
+			Named: namedParams,
+		}),
+		"couldn't execute insertion statement",
+	)
+}
+
 //go:embed select-last-insert-rowid.sql
 var rawSelectLastInsertRowIDQuery string
 var selectLastInsertRowIDQuery string = strings.TrimSpace(rawSelectLastInsertRowIDQuery)
 
-func ExecuteInsertion(
+func ExecuteInsertionForID(
 	conn *sqlite.Conn, query string, namedParams map[string]interface{},
 ) (rowID int64, err error) {
 	defer sqlitex.Save(conn)(&err)
