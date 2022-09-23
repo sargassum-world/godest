@@ -1,4 +1,6 @@
-// Package database provides a SQLite-backed store with migration support
+// Package database provides a high-level relational database interface with schema migration,
+// connection pooling, prepared statement, and embedded query support, wrapping around
+// [zombiezen.com/go/sqlite]'s CGo-free sqlite interface
 package database
 
 import (
@@ -87,8 +89,9 @@ func (db *DB) prepare(conn *sqlite.Conn, pool *sqlitex.Pool) error {
 		return nil
 	}
 
-	// TODO: embed the pragma queries for foreign keys, synchronous, and auto-checkpoint so that we
-	// can parameterize them from environment variables
+	// TODO: embed the pragma queries for foreign keys, synchronous, and auto-checkpoint, and
+	// make it easy to parameterize them from environment variables, and also make it easy to add
+	// additional queries
 	queries, err := readQueries(db.prepareConnQueries, filterQuery)
 	if err != nil {
 		return errors.Wrap(err, "couldn't read connection preparation queries")
@@ -165,6 +168,18 @@ func (db *DB) Migrate(ctx context.Context, schema sqlitemigration.Schema) error 
 
 func (db *DB) ExecuteInsertion(
 	ctx context.Context, query string, namedParams map[string]interface{},
+) error {
+	conn, err := db.AcquireWriter(ctx)
+	if err != nil {
+		return errors.Wrap(err, "couldn't acquire writer to perform insertion")
+	}
+	defer db.ReleaseWriter(conn)
+
+	return ExecuteInsertion(conn, query, namedParams)
+}
+
+func (db *DB) ExecuteInsertionForID(
+	ctx context.Context, query string, namedParams map[string]interface{},
 ) (rowID int64, err error) {
 	conn, err := db.AcquireWriter(ctx)
 	if err != nil {
@@ -172,7 +187,7 @@ func (db *DB) ExecuteInsertion(
 	}
 	defer db.ReleaseWriter(conn)
 
-	return ExecuteInsertion(conn, query, namedParams)
+	return ExecuteInsertionForID(conn, query, namedParams)
 }
 
 func (db *DB) ExecuteUpdate(
