@@ -32,7 +32,9 @@ type SqliteStore struct {
 // according to the schema defined by the migrations in [NewDomainEmbeds].
 //
 // See [sessions.NewCookieStore] for a description of the other parameters.
-func NewSqliteStore(db *database.DB, keyPairs ...[]byte) *SqliteStore {
+func NewSqliteStore(
+	db *database.DB, absoluteTimeout time.Duration, keyPairs ...[]byte,
+) *SqliteStore {
 	// TODO: also take a parameter for a function to modify a Session with *sssion.Session.Valuesa,
 	// which would enable e.g. storing the user identity in a column rather than an encoded string,
 	// to enable selecting all sessions fo a user
@@ -47,7 +49,8 @@ func NewSqliteStore(db *database.DB, keyPairs ...[]byte) *SqliteStore {
 			Path:   "/",
 			MaxAge: maxAge,
 		},
-		db: db,
+		AbsoluteTimeout: absoluteTimeout,
+		db:              db,
 	}
 
 	store.MaxAge(store.Options.MaxAge)
@@ -270,8 +273,7 @@ func (ss *SqliteStore) GetSession(ctx context.Context, id string) (sess Session,
 }
 
 func NewStore(db *database.DB, c session.Config) (store *session.Store, backingStore *SqliteStore) {
-	backingStore = NewSqliteStore(db, c.AuthKey, c.EncryptionKey)
-	backingStore.AbsoluteTimeout = c.Timeouts.Absolute
+	backingStore = NewSqliteStore(db, c.Timeouts.Absolute, c.AuthKey, c.EncryptionKey)
 	backingStore.Options = &c.CookieOptions
 	backingStore.MaxAge(backingStore.Options.MaxAge)
 
