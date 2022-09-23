@@ -52,7 +52,7 @@ func GetConfig() (c Config, err error) {
 	}
 
 	// TODO: when we implement idle timeout, pass that instead of absolute timeout
-	c.CookieOptions, err = getCookieOptions(c.Timeouts.Absolute)
+	c.CookieOptions, err = getCookieOptions()
 	if err != nil {
 		return Config{}, errors.Wrap(err, "couldn't make cookie options config")
 	}
@@ -69,7 +69,7 @@ func GetConfig() (c Config, err error) {
 }
 
 func getTimeouts() (t Timeouts, err error) {
-	const defaultAbsolute = 12 * 60 // default: 12 hours
+	const defaultAbsolute = 60 * 24 * 7 * 24 // default: 1 week
 	rawAbsolute, err := env.GetInt64(envPrefix+"TIMEOUTS_ABSOLUTE", defaultAbsolute)
 	if err != nil {
 		return Timeouts{}, errors.Wrap(err, "couldn't make absolute timeout config")
@@ -78,7 +78,7 @@ func getTimeouts() (t Timeouts, err error) {
 	return t, nil
 }
 
-func getCookieOptions(absoluteTimeout time.Duration) (o sessions.Options, err error) {
+func getCookieOptions() (o sessions.Options, err error) {
 	noHTTPSOnly, err := env.GetBool(envPrefix + "COOKIE_NOHTTPSONLY")
 	if err != nil {
 		return sessions.Options{}, errors.Wrap(err, "couldn't make HTTPS-only config")
@@ -87,7 +87,7 @@ func getCookieOptions(absoluteTimeout time.Duration) (o sessions.Options, err er
 	return sessions.Options{
 		Path:     "/",
 		Domain:   "",
-		MaxAge:   int(absoluteTimeout.Seconds()),
+		MaxAge:   0,
 		Secure:   !noHTTPSOnly,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
