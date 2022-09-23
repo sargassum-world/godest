@@ -25,6 +25,7 @@ type CSRFOptions struct {
 
 type Config struct {
 	AuthKey       []byte
+	EncryptionKey []byte
 	Timeouts      Timeouts
 	CookieOptions sessions.Options
 	CookieName    string
@@ -32,10 +33,17 @@ type Config struct {
 }
 
 func GetConfig() (c Config, err error) {
+	// TODO: support key rotation
 	const authKeySize = 32
 	c.AuthKey, err = env.GetKey(envPrefix+"AUTH_KEY", authKeySize)
 	if err != nil {
-		return Config{}, errors.Wrap(err, "couldn't make session key config")
+		return Config{}, errors.Wrap(err, "couldn't make session auth key config")
+	}
+
+	const encryptionKeySize = 32
+	c.EncryptionKey, err = env.GetKey(envPrefix+"ENCRYPTION_KEY", encryptionKeySize)
+	if err != nil {
+		return Config{}, errors.Wrap(err, "couldn't make session encryption key config")
 	}
 
 	c.Timeouts, err = getTimeouts()
