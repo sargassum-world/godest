@@ -4,6 +4,8 @@ import (
 	"bytes"
 	stdContext "context"
 	"io"
+
+	"github.com/sargassum-world/godest/pubsub"
 )
 
 type Context interface {
@@ -12,7 +14,7 @@ type Context interface {
 	Topic() string
 	SessionID() string
 	Param(name string) string
-	Hub() *MessagesHub
+	Hub() *pubsub.Hub[[]Message]
 	Publish(messages ...Message)
 	Published() []Message
 	MsgWriter() io.Writer
@@ -25,7 +27,7 @@ type context struct {
 	pnames    []string
 	pvalues   []string
 	handler   HandlerFunc
-	hub       *MessagesHub
+	hub       *pubsub.Hub[[]Message]
 	topic     string
 	sessionID string
 	messages  []Message
@@ -60,12 +62,12 @@ func (c *context) Param(name string) string {
 	return ""
 }
 
-func (c *context) Hub() *MessagesHub {
+func (c *context) Hub() *pubsub.Hub[[]Message] {
 	return c.hub
 }
 
 func (c *context) Publish(messages ...Message) {
-	c.hub.Broadcast(c.topic, messages...)
+	c.hub.Broadcast(c.topic, messages)
 }
 
 func (c *context) Published() []Message {

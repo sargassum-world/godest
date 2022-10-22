@@ -36,7 +36,7 @@ type Router interface {
 }
 
 type Broker struct {
-	hub      *MessagesHub
+	hub      *pubsub.Hub[[]Message]
 	router   *router
 	maxParam *int
 	logger   Logger
@@ -50,7 +50,7 @@ type Broker struct {
 
 func NewBroker(logger Logger) *Broker {
 	changes := make(chan pubsub.BroadcastingChange)
-	hub := NewMessagesHub(changes)
+	hub := pubsub.NewHub[[]Message](changes)
 	b := &Broker{
 		hub:           hub,
 		changes:       changes,
@@ -62,7 +62,7 @@ func NewBroker(logger Logger) *Broker {
 	return b
 }
 
-func (b *Broker) Hub() *MessagesHub {
+func (b *Broker) Hub() *pubsub.Hub[[]Message] {
 	return b.hub
 }
 
