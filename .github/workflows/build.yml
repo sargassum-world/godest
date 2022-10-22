@@ -26,7 +26,7 @@ jobs:
 
       - uses: open-policy-agent/setup-opa@v1
         with:
-          version: latest
+          version: 0.45
 
       - name: Build
         run: make ci
@@ -43,7 +43,7 @@ jobs:
           path: dist
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3.1.0
+        uses: codecov/codecov-action@v3.1.1
         with:
           file: ./coverage.out
           flags: ${{ runner.os }}
