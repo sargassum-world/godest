@@ -20,7 +20,7 @@ new(message) := {
 is_error(result) if {
 	result.type == "error"
 	some "message", _ in result
-} else = false {
+} else = false if {
 	true
 }
 
@@ -35,7 +35,7 @@ errorf(format, values) := new(sprintf(format, values))
 #   the provided message as an annotation
 wrap(result, annotation) := result if {
 	not is_error(result)
-} else := error {
+} else := error if {
 	error := errorf("%s: %s", [annotation, result.message])
 }
 
@@ -56,11 +56,11 @@ wrapf(result, annotation_format, annotation_values) := wrap(
 #   provided error messages.
 merge(errors) := errors if {
 	is_error(errors)
-} else := selected_error {
+} else := selected_error if {
 	deduplicated := {error | some error in errors}
 	count(deduplicated) == 1
 	some selected_error in deduplicated
-} else := merged_error {
+} else := merged_error if {
 	count(errors) > 0
 	merged_error := errorf("multiple errors: %s", [concat(
 		", ",

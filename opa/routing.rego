@@ -11,7 +11,7 @@ import data.sargassum.godest.errors
 error_matching_routes(matching_routes) := error_no_matches if {
 	count(matching_routes) == 0
 	error_no_matches := errors.new("no matching route found")
-} else := error_multiple_matches {
+} else := error_multiple_matches if {
 	count(matching_routes) > 1
 	error_multiple_matches := errors.errorf(
 		"multiple matching routes found: %s",
@@ -34,7 +34,7 @@ merge_policy_errors(top_level_errors, policy_errors) := merged if {
 error_matching_policies(matching_policies) := error_no_matches if {
 	count(matching_policies) == 0
 	error_no_matches := errors.new("no matching policy found")
-} else := error_multiple_matches {
+} else := error_multiple_matches if {
 	count(matching_policies) > 1
 	error_multiple_matches := errors.errorf(
 		"multiple matching policies found: %s",

@@ -7,6 +7,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/sargassum-world/godest/actioncable"
+	"github.com/sargassum-world/godest/pubsub"
 )
 
 const ChannelName = "Turbo::StreamsChannel"
@@ -22,7 +23,7 @@ type (
 type Channel struct {
 	identifier  string
 	streamName  string
-	h           *MessagesHub
+	h           *pubsub.Hub[[]Message]
 	handleSub   SubHandler
 	handleUnsub UnsubHandler
 	handleMsg   MsgHandler
@@ -39,7 +40,7 @@ func parseStreamName(identifier string) (string, error) {
 }
 
 func NewChannel(
-	identifier string, h *MessagesHub,
+	identifier string, h *pubsub.Hub[[]Message],
 	handleSub SubHandler, handleUnsub UnsubHandler, handleMsg MsgHandler,
 	checkers ...actioncable.IdentifierChecker,
 ) (*Channel, error) {

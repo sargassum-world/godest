@@ -10,30 +10,30 @@ import (
 
 // Receiver
 
-type DataReceiveFunc func(message interface{}) (ok bool)
+type ReceiveFunc[Message any] func(message Message) (ok bool)
 
-type dataReceiver struct {
+type receiver[Message any] struct {
 	topic   string
-	receive DataReceiveFunc
+	receive ReceiveFunc[Message]
 	cancel  context.CancelFunc
 }
 
 // Hub
 
-type DataHub struct {
-	receivers map[string]map[*dataReceiver]bool
+type Hub[Message any] struct {
+	receivers map[string]map[*receiver[Message]]bool
 	mu        sync.RWMutex
 	brChanges chan<- BroadcastingChange
 }
 
-func NewDataHub(brChanges chan<- BroadcastingChange) *DataHub {
-	return &DataHub{
-		receivers: make(map[string]map[*dataReceiver]bool),
+func NewHub[Message any](brChanges chan<- BroadcastingChange) *Hub[Message] {
+	return &Hub[Message]{
+		receivers: make(map[string]map[*receiver[Message]]bool),
 		brChanges: brChanges,
 	}
 }
 
-func (h *DataHub) Close() {
+func (h *Hub[Message]) Close() {
 	if h.brChanges != nil {
 		close(h.brChanges)
 	}
@@ -41,11 +41,11 @@ func (h *DataHub) Close() {
 	// etc.
 }
 
-func (h *DataHub) Subscribe(
-	topic string, receive DataReceiveFunc,
+func (h *Hub[Message]) Subscribe(
+	topic string, receive ReceiveFunc[Message],
 ) (unsubscriber func(), removed <-chan struct{}) {
 	ctx, cancel := context.WithCancel(context.Background())
-	receiver := &dataReceiver{
+	r := &receiver[Message]{
 		topic:   topic,
 		receive: receive,
 		cancel:  cancel,
@@ -57,11 +57,11 @@ func (h *DataHub) Subscribe(
 	broadcasting, ok := h.receivers[topic]
 	addedTopic := false
 	if !ok {
-		broadcasting = make(map[*dataReceiver]bool)
-		h.receivers[receiver.topic] = broadcasting
+		broadcasting = make(map[*receiver[Message]]bool)
+		h.receivers[r.topic] = broadcasting
 		addedTopic = true
 	}
-	broadcasting[receiver] = true
+	broadcasting[r] = true
 
 	if h.brChanges != nil && addedTopic {
 		h.brChanges <- BroadcastingChange{Added: []string{topic}}
@@ -69,11 +69,11 @@ func (h *DataHub) Subscribe(
 
 	return func() {
 		cancel()
-		h.unsubscribe(receiver)
+		h.unsubscribe(r)
 	}, ctx.Done()
 }
 
-func (h *DataHub) Cancel(topics ...string) {
+func (h *Hub[Message]) Cancel(topics ...string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -82,8 +82,8 @@ func (h *DataHub) Cancel(topics ...string) {
 		if !ok {
 			continue
 		}
-		for receiver := range broadcasting {
-			receiver.cancel()
+		for r := range broadcasting {
+			r.cancel()
 		}
 		delete(h.receivers, topic)
 	}
@@ -93,7 +93,7 @@ func (h *DataHub) Cancel(topics ...string) {
 	}
 }
 
-func (h *DataHub) unsubscribe(receivers ...*dataReceiver) {
+func (h *Hub[Message]) unsubscribe(receivers ...*receiver[Message]) {
 	if len(receivers) == 0 {
 		return
 	}
@@ -102,31 +102,31 @@ func (h *DataHub) unsubscribe(receivers ...*dataReceiver) {
 	defer h.mu.Unlock()
 
 	removedTopics := make([]string, 0, len(receivers))
-	for _, receiver := range receivers {
-		broadcasting, ok := h.receivers[receiver.topic]
+	for _, r := range receivers {
+		broadcasting, ok := h.receivers[r.topic]
 		if !ok {
 			continue
 		}
-		delete(broadcasting, receiver)
+		delete(broadcasting, r)
 		if len(broadcasting) == 0 {
-			delete(h.receivers, receiver.topic)
-			removedTopics = append(removedTopics, receiver.topic)
+			delete(h.receivers, r.topic)
+			removedTopics = append(removedTopics, r.topic)
 		}
-		receiver.cancel()
+		r.cancel()
 	}
 	if h.brChanges != nil && len(removedTopics) > 0 {
 		h.brChanges <- BroadcastingChange{Removed: removedTopics}
 	}
 }
 
-func (h *DataHub) Broadcast(topic string, message interface{}) {
+func (h *Hub[Message]) Broadcast(topic string, message Message) {
 	unsubscribe, _ := h.broadcastStrict(topic, message)
 	h.unsubscribe(unsubscribe...)
 }
 
-func (h *DataHub) broadcastStrict(
-	topic string, message interface{},
-) (unsubscribe []*dataReceiver, err error) {
+func (h *Hub[Message]) broadcastStrict(
+	topic string, message Message,
+) (unsubscribe []*receiver[Message], err error) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -134,23 +134,23 @@ func (h *DataHub) broadcastStrict(
 	if !ok {
 		return nil, errors.Errorf("no receivers for %s", topic)
 	}
-	willUnsubscribe := make(chan *dataReceiver, len(broadcasting))
+	willUnsubscribe := make(chan *receiver[Message], len(broadcasting))
 	wg := sync.WaitGroup{}
-	for receiver := range broadcasting {
+	for r := range broadcasting {
 		wg.Add(1)
-		go func(receiver *dataReceiver, message interface{}, willUnsubscribe chan<- *dataReceiver) {
+		go func(r *receiver[Message], message Message, willUnsubscribe chan<- *receiver[Message]) {
 			defer wg.Done()
-			if !receiver.receive(message) {
-				willUnsubscribe <- receiver
+			if !r.receive(message) {
+				willUnsubscribe <- r
 			}
-		}(receiver, message, willUnsubscribe)
+		}(r, message, willUnsubscribe)
 	}
 	wg.Wait()
 
 	close(willUnsubscribe)
-	unsubscribe = make([]*dataReceiver, 0, len(broadcasting))
-	for receiver := range willUnsubscribe {
-		unsubscribe = append(unsubscribe, receiver)
+	unsubscribe = make([]*receiver[Message], 0, len(broadcasting))
+	for r := range willUnsubscribe {
+		unsubscribe = append(unsubscribe, r)
 	}
 	return unsubscribe, nil
 }
