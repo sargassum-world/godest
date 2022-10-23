@@ -1,5 +1,5 @@
 //nolint:funlen,gocritic,gocognit,gocyclo // All of this is copied from github.com/labstack/echo
-package turbostreams
+package pubsub
 
 // Node
 
@@ -14,28 +14,28 @@ const (
 	anyLabel   = byte('*')
 )
 
-type node struct {
+type node[Message any] struct {
 	kind           kind
 	label          byte
 	prefix         string
-	parent         *node
-	staticChildren children
+	parent         *node[Message]
+	staticChildren children[Message]
 	ppath          string
 	pnames         []string
-	methodHandler  *methodHandler
-	paramChild     *node
-	anyChild       *node
+	methodHandler  *methodHandler[Message]
+	paramChild     *node[Message]
+	anyChild       *node[Message]
 	isLeaf         bool
 	isHandler      bool
 }
-type children []*node
+type children[Message any] []*node[Message]
 
-func newNode(
-	t kind, pre string, p *node, sc children, mh *methodHandler, ppath string, pnames []string,
-	paramChildren, anyChildren *node,
-) *node {
+func newNode[Message any](
+	t kind, pre string, p *node[Message], sc children[Message], mh *methodHandler[Message],
+	ppath string, pnames []string, paramChildren, anyChildren *node[Message],
+) *node[Message] {
 	// Copied from github.com/labstack/echo's newNode function
-	return &node{
+	return &node[Message]{
 		kind:           t,
 		label:          pre[0],
 		prefix:         pre,
@@ -51,12 +51,12 @@ func newNode(
 	}
 }
 
-func (n *node) addStaticChild(c *node) {
+func (n *node[Message]) addStaticChild(c *node[Message]) {
 	// Copied from github.com/labstack/echo's node.addStaticChild method
 	n.staticChildren = append(n.staticChildren, c)
 }
 
-func (n *node) findStaticChild(l byte) *node {
+func (n *node[Message]) findStaticChild(l byte) *node[Message] {
 	// Copied from github.com/labstack/echo's node.findStaticChild method
 	for _, c := range n.staticChildren {
 		if c.label == l {
@@ -66,7 +66,7 @@ func (n *node) findStaticChild(l byte) *node {
 	return nil
 }
 
-func (n *node) findChildWithLabel(l byte) *node {
+func (n *node[Message]) findChildWithLabel(l byte) *node[Message] {
 	// Copied from github.com/labstack/echo's node.findChildWithLabel method
 	for _, c := range n.staticChildren {
 		if c.label == l {
@@ -82,7 +82,7 @@ func (n *node) findChildWithLabel(l byte) *node {
 	return nil
 }
 
-func (n *node) addHandler(method string, h HandlerFunc) {
+func (n *node[Message]) addHandler(method string, h HandlerFunc[Message]) {
 	switch method {
 	case MethodPub:
 		n.methodHandler.pub = h
@@ -101,7 +101,7 @@ func (n *node) addHandler(method string, h HandlerFunc) {
 	}
 }
 
-func (n *node) findHandler(method string) HandlerFunc {
+func (n *node[Message]) findHandler(method string) HandlerFunc[Message] {
 	switch method {
 	default:
 		return nil
@@ -116,7 +116,7 @@ func (n *node) findHandler(method string) HandlerFunc {
 	}
 }
 
-func (n *node) isLeafNode() bool {
+func (n *node[Message]) isLeafNode() bool {
 	return n.staticChildren == nil && n.paramChild == nil && n.anyChild == nil
 }
 
@@ -132,23 +132,23 @@ type Route struct {
 // Router
 
 // router is the registry of routes for subscription matching and topic path parameter parsing.
-type router struct {
-	tree   *node
+type router[Message any] struct {
+	tree   *node[Message]
 	routes map[string]*Route
-	broker *Broker
+	broker *Broker[Message]
 }
 
-func newRouter(b *Broker) *router {
-	return &router{
-		tree: &node{
-			methodHandler: new(methodHandler),
+func newRouter[Message any](b *Broker[Message]) *router[Message] {
+	return &router[Message]{
+		tree: &node[Message]{
+			methodHandler: new(methodHandler[Message]),
 		},
 		routes: make(map[string]*Route),
 		broker: b,
 	}
 }
 
-func (r *router) Add(method, path string, h HandlerFunc) {
+func (r *router[Message]) Add(method, path string, h HandlerFunc[Message]) {
 	// Copied from github.com/labstack/echo's Router.Add method
 	// Validate path
 	if path == "" {
@@ -194,7 +194,9 @@ func (r *router) Add(method, path string, h HandlerFunc) {
 	r.insert(method, path, h, staticKind, ppath, pnames)
 }
 
-func (r *router) insert(method, path string, h HandlerFunc, t kind, ppath string, pnames []string) {
+func (r *router[Message]) insert(
+	method, path string, h HandlerFunc[Message], t kind, ppath string, pnames []string,
+) {
 	// Copied from github.com/labstack/echo's Router.insert method
 	// Adjust max param
 	if paramLen := len(pnames); *r.broker.maxParam < paramLen {
@@ -260,7 +262,7 @@ func (r *router) insert(method, path string, h HandlerFunc, t kind, ppath string
 			currentNode.label = currentNode.prefix[0]
 			currentNode.prefix = currentNode.prefix[:lcpLen]
 			currentNode.staticChildren = nil
-			currentNode.methodHandler = new(methodHandler)
+			currentNode.methodHandler = new(methodHandler[Message])
 			currentNode.ppath = ""
 			currentNode.pnames = nil
 			currentNode.paramChild = nil
@@ -279,7 +281,10 @@ func (r *router) insert(method, path string, h HandlerFunc, t kind, ppath string
 				currentNode.pnames = pnames
 			} else {
 				// Create child node
-				n = newNode(t, search[lcpLen:], currentNode, nil, new(methodHandler), ppath, pnames, nil, nil)
+				n = newNode(
+					t, search[lcpLen:], currentNode, nil, new(methodHandler[Message]),
+					ppath, pnames, nil, nil,
+				)
 				n.addHandler(method, h)
 				// Only Static children could reach here
 				currentNode.addStaticChild(n)
@@ -294,7 +299,10 @@ func (r *router) insert(method, path string, h HandlerFunc, t kind, ppath string
 				continue
 			}
 			// Create child node
-			n := newNode(t, search, currentNode, nil, new(methodHandler), ppath, pnames, nil, nil)
+			n := newNode(
+				t, search, currentNode, nil, new(methodHandler[Message]),
+				ppath, pnames, nil, nil,
+			)
 			n.addHandler(method, h)
 			switch t {
 			case staticKind:
@@ -319,14 +327,14 @@ func (r *router) insert(method, path string, h HandlerFunc, t kind, ppath string
 	}
 }
 
-func (r *router) Find(method, path string, ctx *context) {
+func (r *router[Message]) Find(method, path string, ctx *context[Message]) {
 	// Copied from github.com/labstack/echo's Router.Find method
 	ctx.path = path
 	currentNode := r.tree // Current node as root
 
 	var (
-		previousBestMatchNode *node
-		matchedHandler        HandlerFunc
+		previousBestMatchNode *node[Message]
+		matchedHandler        HandlerFunc[Message]
 		// search stores the remaining path to check for match. By each iteration we move from start of
 		// path to end of the path and search value gets shorter and shorter.
 		search      = path
@@ -514,7 +522,7 @@ func (r *router) Find(method, path string, ctx *context) {
 		// so we can send http.StatusMethodNotAllowed (405) instead of http.StatusNotFound (404)
 		currentNode = previousBestMatchNode
 
-		ctx.handler = NotFoundHandler
+		ctx.handler = NotFoundHandler[Message]
 	}
 	ctx.path = currentNode.ppath
 	ctx.pnames = currentNode.pnames

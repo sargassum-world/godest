@@ -2,7 +2,7 @@
 package pubsub
 
 import (
-	"context"
+	stdContext "context"
 	"sync"
 
 	"github.com/pkg/errors"
@@ -15,10 +15,15 @@ type ReceiveFunc[Message any] func(message Message) (ok bool)
 type receiver[Message any] struct {
 	topic   string
 	receive ReceiveFunc[Message]
-	cancel  context.CancelFunc
+	cancel  stdContext.CancelFunc
 }
 
 // Hub
+
+type BroadcastingChange struct {
+	Added   []string
+	Removed []string
+}
 
 type Hub[Message any] struct {
 	receivers map[string]map[*receiver[Message]]bool
@@ -44,7 +49,7 @@ func (h *Hub[Message]) Close() {
 func (h *Hub[Message]) Subscribe(
 	topic string, receive ReceiveFunc[Message],
 ) (unsubscriber func(), removed <-chan struct{}) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := stdContext.WithCancel(stdContext.Background())
 	r := &receiver[Message]{
 		topic:   topic,
 		receive: receive,

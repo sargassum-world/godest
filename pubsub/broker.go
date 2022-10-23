@@ -1,13 +1,10 @@
-package turbostreams
+package pubsub
 
 import (
 	"bytes"
 	stdContext "context"
 
 	"github.com/pkg/errors"
-
-	"github.com/sargassum-world/godest/actioncable"
-	"github.com/sargassum-world/godest/pubsub"
 )
 
 // Logger is a reduced interface for loggers.
@@ -28,30 +25,30 @@ type Logger interface {
 	Panicf(format string, args ...interface{})
 }
 
-type Router interface {
-	PUB(topic string, h HandlerFunc, m ...MiddlewareFunc) *Route
-	SUB(topic string, h HandlerFunc, m ...MiddlewareFunc) *Route
-	UNSUB(topic string, h HandlerFunc, m ...MiddlewareFunc) *Route
-	MSG(topic string, h HandlerFunc, m ...MiddlewareFunc) *Route
+type Router[Message any] interface {
+	PUB(topic string, h HandlerFunc[Message], m ...MiddlewareFunc[Message]) *Route
+	SUB(topic string, h HandlerFunc[Message], m ...MiddlewareFunc[Message]) *Route
+	UNSUB(topic string, h HandlerFunc[Message], m ...MiddlewareFunc[Message]) *Route
+	MSG(topic string, h HandlerFunc[Message], m ...MiddlewareFunc[Message]) *Route
 }
 
-type Broker struct {
-	hub      *pubsub.Hub[[]Message]
-	router   *router
+type Broker[Message any] struct {
+	hub      *Hub[[]Message]
+	router   *router[Message]
 	maxParam *int
 	logger   Logger
 
-	middleware []MiddlewareFunc
+	middleware []MiddlewareFunc[Message]
 
 	// This is not guarded by a mutex because it's only used by a single goroutine
 	pubCancellers map[string]stdContext.CancelFunc
-	changes       <-chan pubsub.BroadcastingChange
+	changes       <-chan BroadcastingChange
 }
 
-func NewBroker(logger Logger) *Broker {
-	changes := make(chan pubsub.BroadcastingChange)
-	hub := pubsub.NewHub[[]Message](changes)
-	b := &Broker{
+func NewBroker[Message any](logger Logger) *Broker[Message] {
+	changes := make(chan BroadcastingChange)
+	hub := NewHub[[]Message](changes)
+	b := &Broker[Message]{
 		hub:           hub,
 		changes:       changes,
 		pubCancellers: make(map[string]stdContext.CancelFunc),
@@ -62,19 +59,19 @@ func NewBroker(logger Logger) *Broker {
 	return b
 }
 
-func (b *Broker) Hub() *pubsub.Hub[[]Message] {
+func (b *Broker[Message]) Hub() *Hub[[]Message] {
 	return b.hub
 }
 
 // Handler Registration
 
-func (b *Broker) Add(
-	method, topic string, handler HandlerFunc, middleware ...MiddlewareFunc,
+func (b *Broker[Message]) Add(
+	method, topic string, handler HandlerFunc[Message], middleware ...MiddlewareFunc[Message],
 ) *Route {
 	// Copied from github.com/labstack/echo's Echo.add method
 	name := handlerName(handler)
 	router := b.router
-	router.Add(method, topic, func(c Context) error {
+	router.Add(method, topic, func(c Context[Message]) error {
 		h := applyMiddleware(handler, middleware...)
 		return h(c)
 	})
@@ -87,57 +84,56 @@ func (b *Broker) Add(
 	return r
 }
 
-func (b *Broker) PUB(topic string, h HandlerFunc, m ...MiddlewareFunc) *Route {
+func (b *Broker[Message]) PUB(
+	topic string, h HandlerFunc[Message], m ...MiddlewareFunc[Message],
+) *Route {
 	return b.Add(MethodPub, topic, h, m...)
 }
 
-func (b *Broker) SUB(topic string, h HandlerFunc, m ...MiddlewareFunc) *Route {
+func (b *Broker[Message]) SUB(
+	topic string, h HandlerFunc[Message], m ...MiddlewareFunc[Message],
+) *Route {
 	return b.Add(MethodSub, topic, h, m...)
 }
 
-func (b *Broker) UNSUB(topic string, h HandlerFunc, m ...MiddlewareFunc) *Route {
+func (b *Broker[Message]) UNSUB(
+	topic string, h HandlerFunc[Message], m ...MiddlewareFunc[Message],
+) *Route {
 	return b.Add(MethodUnsub, topic, h, m...)
 }
 
-func (b *Broker) MSG(topic string, h HandlerFunc, m ...MiddlewareFunc) *Route {
+func (b *Broker[Message]) MSG(
+	topic string, h HandlerFunc[Message], m ...MiddlewareFunc[Message],
+) *Route {
 	return b.Add(MethodMsg, topic, h, m...)
 }
 
 // Middleware
 
-func (b *Broker) Use(middleware ...MiddlewareFunc) {
+func (b *Broker[Message]) Use(middleware ...MiddlewareFunc[Message]) {
 	b.middleware = append(b.middleware, middleware...)
 }
 
-func (b *Broker) getHandler(method string, topic string, c *context) HandlerFunc {
+func (b *Broker[Message]) getHandler(
+	method string, topic string, c *context[Message],
+) HandlerFunc[Message] {
 	b.router.Find(method, topic, c)
 	return applyMiddleware(c.handler, b.middleware...)
 }
 
-// Action Cable Support
+// Handlers
 
-func (b *Broker) ChannelFactory(
-	sessionID string, checkers ...actioncable.IdentifierChecker,
-) actioncable.ChannelFactory {
-	return func(identifier string) (actioncable.Channel, error) {
-		return NewChannel(
-			identifier, b.hub,
-			b.subHandler(sessionID), b.unsubHandler(sessionID), b.msgHandler(sessionID), checkers...,
-		)
-	}
-}
-
-func (b *Broker) newContext(ctx stdContext.Context, topic string) *context {
-	return &context{
+func (b *Broker[Message]) newContext(ctx stdContext.Context, topic string) *context[Message] {
+	return &context[Message]{
 		context: ctx,
 		pvalues: make([]string, *b.maxParam),
-		handler: NotFoundHandler,
+		handler: NotFoundHandler[Message],
 		hub:     b.hub,
 		topic:   topic,
 	}
 }
 
-func (b *Broker) subHandler(sessionID string) SubHandler {
+func (b *Broker[Message]) SubHandler(sessionID string) SubHandler {
 	return func(ctx stdContext.Context, topic string) error {
 		c := b.newContext(ctx, topic)
 		c.method = MethodSub
@@ -151,7 +147,7 @@ func (b *Broker) subHandler(sessionID string) SubHandler {
 	}
 }
 
-func (b *Broker) unsubHandler(sessionID string) UnsubHandler {
+func (b *Broker[Message]) UnsubHandler(sessionID string) UnsubHandler {
 	return func(ctx stdContext.Context, topic string) {
 		c := b.newContext(ctx, topic)
 		c.method = MethodUnsub
@@ -164,7 +160,7 @@ func (b *Broker) unsubHandler(sessionID string) UnsubHandler {
 	}
 }
 
-func (b *Broker) msgHandler(sessionID string) MsgHandler {
+func (b *Broker[Message]) MsgHandler(sessionID string) MsgHandler[Message] {
 	return func(ctx stdContext.Context, topic string, messages []Message) (result string, err error) {
 		c := b.newContext(ctx, topic)
 		c.method = MethodMsg
@@ -183,7 +179,7 @@ func (b *Broker) msgHandler(sessionID string) MsgHandler {
 
 // Managed Publishing
 
-func (b *Broker) startPub(ctx stdContext.Context, topic string) {
+func (b *Broker[Message]) startPub(ctx stdContext.Context, topic string) {
 	ctx, canceler := stdContext.WithCancel(ctx)
 	c := b.newContext(ctx, topic)
 	c.method = MethodPub
@@ -197,14 +193,14 @@ func (b *Broker) startPub(ctx stdContext.Context, topic string) {
 	}()
 }
 
-func (b *Broker) cancelPub(topic string) {
+func (b *Broker[Message]) cancelPub(topic string) {
 	if canceller, ok := b.pubCancellers[topic]; ok {
 		canceller()
 		delete(b.pubCancellers, topic)
 	}
 }
 
-func (b *Broker) Serve(ctx stdContext.Context) error {
+func (b *Broker[Message]) Serve(ctx stdContext.Context) error {
 	go func() {
 		<-ctx.Done()
 		b.hub.Close()

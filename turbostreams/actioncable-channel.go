@@ -1,7 +1,7 @@
 package turbostreams
 
 import (
-	stdContext "context"
+	"context"
 	"encoding/json"
 
 	"github.com/pkg/errors"
@@ -10,23 +10,17 @@ import (
 	"github.com/sargassum-world/godest/pubsub"
 )
 
-const ChannelName = "Turbo::StreamsChannel"
+// Turbo StreamsChannel for Action Cable
 
-type (
-	SubHandler   func(ctx stdContext.Context, streamName string) error
-	UnsubHandler func(ctx stdContext.Context, streamName string)
-	MsgHandler   func(
-		ctx stdContext.Context, streamName string, messages []Message,
-	) (result string, err error)
-)
+const ChannelName = "Turbo::StreamsChannel"
 
 type Channel struct {
 	identifier  string
 	streamName  string
 	h           *pubsub.Hub[[]Message]
-	handleSub   SubHandler
-	handleUnsub UnsubHandler
-	handleMsg   MsgHandler
+	handleSub   pubsub.SubHandler
+	handleUnsub pubsub.UnsubHandler
+	handleMsg   pubsub.MsgHandler[Message]
 }
 
 func parseStreamName(identifier string) (string, error) {
@@ -41,7 +35,8 @@ func parseStreamName(identifier string) (string, error) {
 
 func NewChannel(
 	identifier string, h *pubsub.Hub[[]Message],
-	handleSub SubHandler, handleUnsub UnsubHandler, handleMsg MsgHandler,
+	handleSub pubsub.SubHandler, handleUnsub pubsub.UnsubHandler,
+	handleMsg pubsub.MsgHandler[Message],
 	checkers ...actioncable.IdentifierChecker,
 ) (*Channel, error) {
 	name, err := parseStreamName(identifier)
@@ -64,7 +59,7 @@ func NewChannel(
 }
 
 func (c *Channel) Subscribe(
-	ctx stdContext.Context, sub actioncable.Subscription,
+	ctx context.Context, sub actioncable.Subscription,
 ) (unsubscriber func(), err error) {
 	if sub.Identifier() != c.identifier {
 		return nil, errors.Errorf(
@@ -75,7 +70,7 @@ func (c *Channel) Subscribe(
 	if err := c.handleSub(ctx, c.streamName); err != nil {
 		return nil, nil // since subscribing isn't possible/authorized, reject the subscription
 	}
-	ctx, cancel := stdContext.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(ctx)
 	unsub, removed := c.h.Subscribe(c.streamName, func(messages []Message) (ok bool) {
 		if ctx.Err() != nil {
 			return false
@@ -105,4 +100,17 @@ func (c *Channel) Subscribe(
 
 func (c *Channel) Perform(data string) error {
 	return errors.New("turbo streams channel cannot perform any actions")
+}
+
+// Pub-Sub Broker Integration
+
+func NewChannelFactory(
+	b *pubsub.Broker[Message], sessionID string, checkers ...actioncable.IdentifierChecker,
+) actioncable.ChannelFactory {
+	return func(identifier string) (actioncable.Channel, error) {
+		return NewChannel(
+			identifier, b.Hub(),
+			b.SubHandler(sessionID), b.UnsubHandler(sessionID), b.MsgHandler(sessionID), checkers...,
+		)
+	}
 }
