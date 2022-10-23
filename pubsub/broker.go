@@ -139,7 +139,7 @@ func (b *Broker[Message]) SubHandler(sessionID string) SubHandler {
 		c.method = MethodSub
 		c.sessionID = sessionID
 		h := b.getHandler(MethodSub, topic, c)
-		err := errors.Wrapf(h(c), "turbo streams not subscribable on topic %s", topic)
+		err := errors.Wrapf(h(c), "couldn't handle subscribe on topic %s", topic)
 		if err != nil && !errors.Is(err, stdContext.Canceled) {
 			b.logger.Error(err)
 		}
@@ -153,7 +153,7 @@ func (b *Broker[Message]) UnsubHandler(sessionID string) UnsubHandler {
 		c.method = MethodUnsub
 		c.sessionID = sessionID
 		h := b.getHandler(MethodUnsub, topic, c)
-		err := errors.Wrapf(h(c), "turbo streams not unsubscribable on topic %s", topic)
+		err := errors.Wrapf(h(c), "couldn't handle unsubscribe on topic %s", topic)
 		if err != nil && !errors.Is(err, stdContext.Canceled) {
 			b.logger.Error(err)
 		}
@@ -168,7 +168,7 @@ func (b *Broker[Message]) MsgHandler(sessionID string) MsgHandler[Message] {
 		c.messages = messages
 		c.rendered = &bytes.Buffer{}
 		h := b.getHandler(MethodMsg, topic, c)
-		err = errors.Wrapf(h(c), "turbo streams message not processable on topic %s", topic)
+		err = errors.Wrapf(h(c), "couldn't handle message post-processing on topic %s", topic)
 		if err != nil && !errors.Is(err, stdContext.Canceled) {
 			b.logger.Error(err)
 			return "", err
