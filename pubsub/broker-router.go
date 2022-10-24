@@ -1,6 +1,100 @@
 //nolint:funlen,gocritic,gocognit,gocyclo // All of this is copied from github.com/labstack/echo
 package pubsub
 
+// Methods
+
+const (
+	MethodPub     = "PUB"
+	MethodSub     = "SUB"
+	MethodUnsub   = "UNSUB"
+	RouteNotFound = "pubsub_route_not_found"
+)
+
+type routeMethod[HandlerContext Context] struct {
+	ppath   string
+	pnames  []string
+	handler HandlerFunc[HandlerContext]
+}
+
+type routeMethods[HandlerContext Context] struct {
+	pub    *routeMethod[HandlerContext]
+	sub    *routeMethod[HandlerContext]
+	unsub  *routeMethod[HandlerContext]
+	others map[string]*routeMethod[HandlerContext]
+}
+
+func (r *routeMethods[HandlerContext]) isHandler() bool {
+	return r.pub != nil || r.sub != nil || r.unsub != nil || len(r.others) != 0
+}
+
+func (r *routeMethods[HandlerContext]) set(method string, rm *routeMethod[HandlerContext]) {
+	switch method {
+	case MethodPub:
+		r.pub = rm
+	case MethodSub:
+		r.sub = rm
+	case MethodUnsub:
+		r.unsub = rm
+	default:
+		if r.others == nil {
+			r.others = make(map[string]*routeMethod[HandlerContext])
+		}
+		if rm.handler == nil {
+			delete(r.others, method)
+		} else {
+			r.others[method] = rm
+		}
+	}
+}
+
+func (r *routeMethods[HandlerContext]) get(
+	method string,
+) *routeMethod[HandlerContext] {
+	switch method {
+	case MethodPub:
+		return r.pub
+	case MethodSub:
+		return r.sub
+	case MethodUnsub:
+		return r.unsub
+	default:
+		return r.others[method]
+	}
+}
+
+// Context
+
+type RouterContext[HandlerContext Context] struct {
+	path    string
+	pnames  []string
+	pvalues []string
+	handler HandlerFunc[HandlerContext]
+}
+
+func (c *RouterContext[HandlerContext]) Path() string {
+	return c.path
+}
+
+func (c *RouterContext[HandlerContext]) Param(name string) string {
+	// Copied from github.com/labstack/echo's context.Param method
+	for i, n := range c.pnames {
+		if i < len(c.pvalues) {
+			if n == name {
+				return c.pvalues[i]
+			}
+		}
+	}
+	return ""
+}
+
+func (c *RouterContext[HandlerContext]) ParamNames() []string {
+	return c.pnames
+}
+
+func (c *RouterContext[HandlerContext]) ParamValues() []string {
+	return c.pvalues[:len(c.pnames)]
+}
+
 // Node
 
 type kind uint8
@@ -14,49 +108,51 @@ const (
 	anyLabel   = byte('*')
 )
 
-type node[Message any] struct {
-	kind           kind
-	label          byte
-	prefix         string
-	parent         *node[Message]
-	staticChildren children[Message]
-	ppath          string
-	pnames         []string
-	methodHandler  *methodHandler[Message]
-	paramChild     *node[Message]
-	anyChild       *node[Message]
-	isLeaf         bool
-	isHandler      bool
+type node[HandlerContext Context] struct {
+	kind            kind
+	label           byte
+	prefix          string
+	parent          *node[HandlerContext]
+	staticChildren  []*node[HandlerContext]
+	originalPath    string
+	methods         *routeMethods[HandlerContext]
+	paramChild      *node[HandlerContext]
+	anyChild        *node[HandlerContext]
+	paramsCount     int
+	isLeaf          bool // indicates that node does not have child nodes
+	isHandler       bool // indicates that node has at least one handler registered to it
+	notFoundHandler *routeMethod[HandlerContext]
 }
-type children[Message any] []*node[Message]
 
-func newNode[Message any](
-	t kind, pre string, p *node[Message], sc children[Message], mh *methodHandler[Message],
-	ppath string, pnames []string, paramChildren, anyChildren *node[Message],
-) *node[Message] {
+func newNode[HandlerContext Context](
+	t kind, pre string, p *node[HandlerContext], sc []*node[HandlerContext], originalPath string,
+	methods *routeMethods[HandlerContext], paramsCount int,
+	paramChildren, anyChildren *node[HandlerContext], notFoundHandler *routeMethod[HandlerContext],
+) *node[HandlerContext] {
 	// Copied from github.com/labstack/echo's newNode function
-	return &node[Message]{
-		kind:           t,
-		label:          pre[0],
-		prefix:         pre,
-		parent:         p,
-		staticChildren: sc,
-		ppath:          ppath,
-		pnames:         pnames,
-		methodHandler:  mh,
-		paramChild:     paramChildren,
-		anyChild:       anyChildren,
-		isLeaf:         sc == nil && paramChildren == nil && anyChildren == nil,
-		isHandler:      mh.isHandler(),
+	return &node[HandlerContext]{
+		kind:            t,
+		label:           pre[0],
+		prefix:          pre,
+		parent:          p,
+		staticChildren:  sc,
+		originalPath:    originalPath,
+		methods:         methods,
+		paramsCount:     paramsCount,
+		paramChild:      paramChildren,
+		anyChild:        anyChildren,
+		isLeaf:          sc == nil && paramChildren == nil && anyChildren == nil,
+		isHandler:       methods.isHandler(),
+		notFoundHandler: notFoundHandler,
 	}
 }
 
-func (n *node[Message]) addStaticChild(c *node[Message]) {
+func (n *node[HandlerContext]) addStaticChild(c *node[HandlerContext]) {
 	// Copied from github.com/labstack/echo's node.addStaticChild method
 	n.staticChildren = append(n.staticChildren, c)
 }
 
-func (n *node[Message]) findStaticChild(l byte) *node[Message] {
+func (n *node[HandlerContext]) findStaticChild(l byte) *node[HandlerContext] {
 	// Copied from github.com/labstack/echo's node.findStaticChild method
 	for _, c := range n.staticChildren {
 		if c.label == l {
@@ -66,12 +162,10 @@ func (n *node[Message]) findStaticChild(l byte) *node[Message] {
 	return nil
 }
 
-func (n *node[Message]) findChildWithLabel(l byte) *node[Message] {
+func (n *node[HandlerContext]) findChildWithLabel(l byte) *node[HandlerContext] {
 	// Copied from github.com/labstack/echo's node.findChildWithLabel method
-	for _, c := range n.staticChildren {
-		if c.label == l {
-			return c
-		}
+	if c := n.findStaticChild(l); c != nil {
+		return c
 	}
 	if l == paramLabel {
 		return n.paramChild
@@ -82,41 +176,25 @@ func (n *node[Message]) findChildWithLabel(l byte) *node[Message] {
 	return nil
 }
 
-func (n *node[Message]) addHandler(method string, h HandlerFunc[Message]) {
-	switch method {
-	case MethodPub:
-		n.methodHandler.pub = h
-	case MethodSub:
-		n.methodHandler.sub = h
-	case MethodUnsub:
-		n.methodHandler.unsub = h
-	case MethodMsg:
-		n.methodHandler.msg = h
+func (n *node[HandlerContext]) addMethod(method string, rm *routeMethod[HandlerContext]) {
+	if method == RouteNotFound {
+		n.notFoundHandler = rm
+		return
 	}
 
-	if h != nil {
+	n.methods.set(method, rm)
+	if rm.handler != nil {
 		n.isHandler = true
 	} else {
-		n.isHandler = n.methodHandler.isHandler()
+		n.isHandler = n.methods.isHandler()
 	}
 }
 
-func (n *node[Message]) findHandler(method string) HandlerFunc[Message] {
-	switch method {
-	default:
-		return nil
-	case MethodPub:
-		return n.methodHandler.pub
-	case MethodSub:
-		return n.methodHandler.sub
-	case MethodUnsub:
-		return n.methodHandler.unsub
-	case MethodMsg:
-		return n.methodHandler.msg
-	}
+func (n *node[HandlerContext]) findMethod(method string) *routeMethod[HandlerContext] {
+	return n.methods.get(method)
 }
 
-func (n *node[Message]) isLeafNode() bool {
+func (n *node[HandlerContext]) isLeafNode() bool {
 	return n.staticChildren == nil && n.paramChild == nil && n.anyChild == nil
 }
 
@@ -129,26 +207,27 @@ type Route struct {
 	Name   string `json:"name"`
 }
 
-// Router
+// Handler Router
 
-// router is the registry of routes for subscription matching and topic path parameter parsing.
-type router[Message any] struct {
-	tree   *node[Message]
-	routes map[string]*Route
-	broker *Broker[Message]
+// HandlerRouter is the registry of routes for subscription matching and topic path parameter
+// parsing.
+type HandlerRouter[HandlerContext Context] struct {
+	tree     *node[HandlerContext]
+	routes   map[string]*Route
+	maxParam *int
 }
 
-func newRouter[Message any](b *Broker[Message]) *router[Message] {
-	return &router[Message]{
-		tree: &node[Message]{
-			methodHandler: new(methodHandler[Message]),
+func NewHandlerRouter[HandlerContext Context](maxParam *int) *HandlerRouter[HandlerContext] {
+	return &HandlerRouter[HandlerContext]{
+		tree: &node[HandlerContext]{
+			methods: new(routeMethods[HandlerContext]),
 		},
-		routes: make(map[string]*Route),
-		broker: b,
+		routes:   map[string]*Route{},
+		maxParam: maxParam,
 	}
 }
 
-func (r *router[Message]) Add(method, path string, h HandlerFunc[Message]) {
+func (r *HandlerRouter[HandlerContext]) Add(method, path string, h HandlerFunc[HandlerContext]) {
 	// Copied from github.com/labstack/echo's Router.Add method
 	// Validate path
 	if path == "" {
@@ -170,7 +249,7 @@ func (r *router[Message]) Add(method, path string, h HandlerFunc[Message]) {
 			}
 			j := i + 1
 
-			r.insert(method, path[:i], nil, staticKind, "", nil)
+			r.insert(method, path[:i], staticKind, routeMethod[HandlerContext]{})
 			for ; i < lcpIndex && path[i] != '/'; i++ {
 			}
 
@@ -180,27 +259,27 @@ func (r *router[Message]) Add(method, path string, h HandlerFunc[Message]) {
 
 			if i == lcpIndex {
 				// path node is last fragment of route path. ie. `/users/:id`
-				r.insert(method, path[:i], h, paramKind, ppath, pnames)
+				r.insert(method, path[:i], paramKind, routeMethod[HandlerContext]{ppath, pnames, h})
 			} else {
-				r.insert(method, path[:i], nil, paramKind, "", nil)
+				r.insert(method, path[:i], paramKind, routeMethod[HandlerContext]{})
 			}
 		} else if path[i] == '*' {
-			r.insert(method, path[:i], nil, staticKind, "", nil)
+			r.insert(method, path[:i], staticKind, routeMethod[HandlerContext]{})
 			pnames = append(pnames, "*")
-			r.insert(method, path[:i+1], h, anyKind, ppath, pnames)
+			r.insert(method, path[:i+1], anyKind, routeMethod[HandlerContext]{ppath, pnames, h})
 		}
 	}
 
-	r.insert(method, path, h, staticKind, ppath, pnames)
+	r.insert(method, path, staticKind, routeMethod[HandlerContext]{ppath, pnames, h})
 }
 
-func (r *router[Message]) insert(
-	method, path string, h HandlerFunc[Message], t kind, ppath string, pnames []string,
+func (r *HandlerRouter[HandlerContext]) insert(
+	method, path string, t kind, rm routeMethod[HandlerContext],
 ) {
 	// Copied from github.com/labstack/echo's Router.insert method
 	// Adjust max param
-	if paramLen := len(pnames); *r.broker.maxParam < paramLen {
-		*r.broker.maxParam = paramLen
+	if paramLen := len(rm.pnames); *r.maxParam < paramLen {
+		*r.maxParam = paramLen
 	}
 
 	currentNode := r.tree // Current node as root
@@ -226,25 +305,31 @@ func (r *router[Message]) insert(
 			// At root node
 			currentNode.label = search[0]
 			currentNode.prefix = search
-			if h != nil {
+			if rm.handler != nil {
 				currentNode.kind = t
-				currentNode.addHandler(method, h)
-				currentNode.ppath = ppath
-				currentNode.pnames = pnames
+				currentNode.addMethod(method, &rm)
+				currentNode.paramsCount = len(rm.pnames)
+				currentNode.originalPath = rm.ppath
 			}
 			currentNode.isLeaf = currentNode.isLeafNode()
 		} else if lcpLen < prefixLen {
-			// Split node
+			// Split node into two before we insert new node.
+			// This happens when we are inserting path that is submatch of any existing inserted paths.
+			// For example, we have node `/test` and now are about to insert `/te/*`. In that case
+			// 1. overlapping part is `/te` that is used as parent node
+			// 2. `st` is non-matching part from existing node - it gets its own node (child to `/te`)
+			// 3. `/*` is the new part we are about to insert (child to `/te`)
 			n := newNode(
 				currentNode.kind,
 				currentNode.prefix[lcpLen:],
 				currentNode,
 				currentNode.staticChildren,
-				currentNode.methodHandler,
-				currentNode.ppath,
-				currentNode.pnames,
+				currentNode.originalPath,
+				currentNode.methods,
+				currentNode.paramsCount,
 				currentNode.paramChild,
 				currentNode.anyChild,
+				currentNode.notFoundHandler,
 			)
 			// Update parent path for all children to new node
 			for _, child := range currentNode.staticChildren {
@@ -262,13 +347,14 @@ func (r *router[Message]) insert(
 			currentNode.label = currentNode.prefix[0]
 			currentNode.prefix = currentNode.prefix[:lcpLen]
 			currentNode.staticChildren = nil
-			currentNode.methodHandler = new(methodHandler[Message])
-			currentNode.ppath = ""
-			currentNode.pnames = nil
+			currentNode.originalPath = ""
+			currentNode.methods = new(routeMethods[HandlerContext])
+			currentNode.paramsCount = 0
 			currentNode.paramChild = nil
 			currentNode.anyChild = nil
 			currentNode.isLeaf = false
 			currentNode.isHandler = false
+			currentNode.notFoundHandler = nil
 
 			// Only Static children could reach here
 			currentNode.addStaticChild(n)
@@ -276,16 +362,20 @@ func (r *router[Message]) insert(
 			if lcpLen == searchLen {
 				// At parent node
 				currentNode.kind = t
-				currentNode.addHandler(method, h)
-				currentNode.ppath = ppath
-				currentNode.pnames = pnames
+				currentNode.addMethod(method, &rm)
+				currentNode.paramsCount = len(rm.pnames)
+				currentNode.originalPath = rm.ppath
 			} else {
 				// Create child node
 				n = newNode(
-					t, search[lcpLen:], currentNode, nil, new(methodHandler[Message]),
-					ppath, pnames, nil, nil,
+					t, search[lcpLen:], currentNode, nil, "", new(routeMethods[HandlerContext]), 0,
+					nil, nil, nil,
 				)
-				n.addHandler(method, h)
+				if rm.handler != nil {
+					n.addMethod(method, &rm)
+					n.paramsCount = len(rm.pnames)
+					n.originalPath = rm.ppath
+				}
 				// Only Static children could reach here
 				currentNode.addStaticChild(n)
 			}
@@ -300,10 +390,13 @@ func (r *router[Message]) insert(
 			}
 			// Create child node
 			n := newNode(
-				t, search, currentNode, nil, new(methodHandler[Message]),
-				ppath, pnames, nil, nil,
+				t, search, currentNode, nil, rm.ppath, new(routeMethods[HandlerContext]), 0,
+				nil, nil, nil,
 			)
-			n.addHandler(method, h)
+			if rm.handler != nil {
+				n.addMethod(method, &rm)
+				n.paramsCount = len(rm.pnames)
+			}
 			switch t {
 			case staticKind:
 				currentNode.addStaticChild(n)
@@ -315,26 +408,26 @@ func (r *router[Message]) insert(
 			currentNode.isLeaf = currentNode.isLeafNode()
 		} else {
 			// Node already exists
-			if h != nil {
-				currentNode.addHandler(method, h)
-				currentNode.ppath = ppath
-				if len(currentNode.pnames) == 0 { // Issue #729
-					currentNode.pnames = pnames
-				}
+			if rm.handler != nil {
+				currentNode.addMethod(method, &rm)
+				currentNode.paramsCount = len(rm.pnames)
+				currentNode.originalPath = rm.ppath
 			}
 		}
 		return
 	}
 }
 
-func (r *router[Message]) Find(method, path string, ctx *context[Message]) {
+func (r *HandlerRouter[HandlerContext]) Find(
+	method, path string, ctx *RouterContext[HandlerContext],
+) {
 	// Copied from github.com/labstack/echo's Router.Find method
 	ctx.path = path
 	currentNode := r.tree // Current node as root
 
 	var (
-		previousBestMatchNode *node[Message]
-		matchedHandler        HandlerFunc[Message]
+		previousBestMatchNode *node[HandlerContext]
+		matchedRouteMethod    *routeMethod[HandlerContext]
 		// search stores the remaining path to check for match. By each iteration we move from start of
 		// path to end of the path and search value gets shorter and shorter.
 		search      = path
@@ -433,14 +526,20 @@ func (r *router[Message]) Find(method, path string, ctx *context[Message]) {
 
 		// Finish routing if no remaining search and we are on a node with handler and matching method
 		// type
-		if search == "" && currentNode.isHandler {
-			// check if current node has handler registered for http method we are looking for. we store
-			// currentNode as best matching in case we do no find no more routes matching this path+method
-			if previousBestMatchNode == nil {
-				previousBestMatchNode = currentNode
-			}
-			if h := currentNode.findHandler(method); h != nil {
-				matchedHandler = h
+		if search == "" {
+			// in case of node that is handler we have exact method type match or something for 405 to use
+			if currentNode.isHandler {
+				// check if current node has handler registered for http method we are looking for. we store
+				// currentNode as best matching in case we find no more routes matching this path+method
+				if previousBestMatchNode == nil {
+					previousBestMatchNode = currentNode
+				}
+				if rm := currentNode.findMethod(method); rm != nil {
+					matchedRouteMethod = rm
+					break
+				}
+			} else if currentNode.notFoundHandler != nil {
+				matchedRouteMethod = currentNode.notFoundHandler
 				break
 			}
 		}
@@ -480,19 +579,25 @@ func (r *router[Message]) Find(method, path string, ctx *context[Message]) {
 		if child := currentNode.anyChild; child != nil {
 			// If any node is found, use remaining path for paramValues
 			currentNode = child
-			paramValues[len(currentNode.pnames)-1] = search
+			paramValues[currentNode.paramsCount-1] = search
+
 			// update indexes/search in case we need to backtrack when no handler match is found
 			paramIndex++
 			searchIndex += +len(search)
 			search = ""
 
-			// check if current node has handler registered for http method we are looking for. we store
-			// currentNode as best matching in case we do no find no more routes matching this path+method
+			if rm := currentNode.findMethod(method); rm != nil {
+				matchedRouteMethod = rm
+				break
+			}
+
+			// we store currentNode as best matching in case we find no more routes matching this
+			// path+method. Needed for 405
 			if previousBestMatchNode == nil {
 				previousBestMatchNode = currentNode
 			}
-			if h := currentNode.findHandler(method); h != nil {
-				matchedHandler = h
+			if currentNode.notFoundHandler != nil {
+				matchedRouteMethod = currentNode.notFoundHandler
 				break
 			}
 		}
@@ -515,15 +620,32 @@ func (r *router[Message]) Find(method, path string, ctx *context[Message]) {
 		return // nothing matched at all
 	}
 
-	if matchedHandler != nil {
-		ctx.handler = matchedHandler
+	// matchedHandler could be method+path handler that we matched or notFoundHandler from node with
+	// matching path
+	// user-provided not found (404) handler has priority over generic method not found (405) handler
+	// or global 404 handler
+	var rPath string
+	var rPNames []string
+	if matchedRouteMethod != nil {
+		rPath = matchedRouteMethod.ppath
+		rPNames = matchedRouteMethod.pnames
+		ctx.handler = matchedRouteMethod.handler
 	} else {
 		// use previous match as basis. although we have no matching handler we have path match.
 		// so we can send http.StatusMethodNotAllowed (405) instead of http.StatusNotFound (404)
 		currentNode = previousBestMatchNode
 
-		ctx.handler = NotFoundHandler[Message]
+		rPath = currentNode.originalPath
+		rPNames = nil // no params here
+		ctx.handler = NotFoundHandler[HandlerContext]
+		if currentNode.notFoundHandler != nil {
+			rPath = currentNode.notFoundHandler.ppath
+			rPNames = currentNode.notFoundHandler.pnames
+			ctx.handler = currentNode.notFoundHandler.handler
+		} else if currentNode.isHandler {
+			ctx.handler = MethodNotAllowedHandler[HandlerContext]
+		}
 	}
-	ctx.path = currentNode.ppath
-	ctx.pnames = currentNode.pnames
+	ctx.path = rPath
+	ctx.pnames = rPNames
 }
