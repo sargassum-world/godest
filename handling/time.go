@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+type Worker func() (done bool, err error)
+
 func Repeat(ctx context.Context, interval time.Duration, f func() (done bool, err error)) error {
 	if interval == 0 {
 		return repeatInstantly(ctx, f)

@@ -4,6 +4,8 @@ import (
 	"context"
 )
 
+type Consumer[T any] func(elem T) (done bool, err error)
+
 func Consume[T any](
 	ctx context.Context, ch <-chan T, f func(elem T) (done bool, err error),
 ) error {
