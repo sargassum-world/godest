@@ -8,7 +8,7 @@ import (
 
 type Worker func() (done bool, err error)
 
-func Repeat(ctx context.Context, interval time.Duration, f func() (done bool, err error)) error {
+func Repeat(ctx context.Context, interval time.Duration, f Worker) error {
 	if interval == 0 {
 		return repeatInstantly(ctx, f)
 	}
@@ -35,7 +35,7 @@ func Repeat(ctx context.Context, interval time.Duration, f func() (done bool, er
 	}
 }
 
-func repeatInstantly(ctx context.Context, f func() (done bool, err error)) error {
+func repeatInstantly(ctx context.Context, f Worker) error {
 	for {
 		select {
 		case <-ctx.Done():
