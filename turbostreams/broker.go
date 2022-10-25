@@ -128,7 +128,6 @@ func (b *Broker) Subscribe(
 			rendered, err := b.triggerMsg(ctx, topic, sessionID, messages)
 			if err != nil {
 				b.logger.Error(errors.Wrapf(err, "msg handler on topic %s failed", topic))
-				// sub.Close()
 				return false
 			}
 			return msgConsumer(ctx, rendered)

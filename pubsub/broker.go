@@ -240,7 +240,7 @@ func (b *Broker[HandlerContext, Message]) CancelPub(topic string) {
 
 func (b *Broker[HandlerContext, Message]) Subscribe(
 	ctx context.Context, topic string, hc HandlerContextMaker[HandlerContext, Message],
-	pubConsumer func(ctx context.Context, messages []Message) (ok bool),
+	broadcastHandler func(ctx context.Context, messages []Message) (ok bool),
 ) (unsubscriber func(), finished <-chan struct{}) {
 	if err := b.TriggerSub(ctx, topic, hc); err != nil {
 		return nil, nil // since subscribing isn't possible/authorized, reject the subscription
@@ -250,7 +250,7 @@ func (b *Broker[HandlerContext, Message]) Subscribe(
 		if ctx.Err() != nil {
 			return false
 		}
-		if ok := pubConsumer(ctx, messages); !ok {
+		if ok := broadcastHandler(ctx, messages); !ok {
 			cancel()
 			return false
 		}
