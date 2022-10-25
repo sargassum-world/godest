@@ -2,223 +2,148 @@ package turbostreams
 
 import (
 	"bytes"
-	stdContext "context"
+	"context"
+	"io"
 
 	"github.com/pkg/errors"
 
-	"github.com/sargassum-world/godest/actioncable"
 	"github.com/sargassum-world/godest/pubsub"
 )
 
-// Logger is a reduced interface for loggers.
-type Logger interface {
-	Print(i ...interface{})
-	Printf(format string, args ...interface{})
-	Debug(i ...interface{})
-	Debugf(format string, args ...interface{})
-	Info(i ...interface{})
-	Infof(format string, args ...interface{})
-	Warn(i ...interface{})
-	Warnf(format string, args ...interface{})
-	Error(i ...interface{})
-	Errorf(format string, args ...interface{})
-	Fatal(i ...interface{})
-	Fatalf(format string, args ...interface{})
-	Panic(i ...interface{})
-	Panicf(format string, args ...interface{})
+// Context
+
+type brokerContext = pubsub.BrokerContext[*Context, Message]
+
+type Context struct {
+	*brokerContext
+
+	sessionID string
+	messages  []Message
+	rendered  *bytes.Buffer
 }
 
-type Router interface {
-	PUB(topic string, h HandlerFunc, m ...MiddlewareFunc) *Route
-	SUB(topic string, h HandlerFunc, m ...MiddlewareFunc) *Route
-	UNSUB(topic string, h HandlerFunc, m ...MiddlewareFunc) *Route
-	MSG(topic string, h HandlerFunc, m ...MiddlewareFunc) *Route
+func (c *Context) SessionID() string {
+	return c.sessionID
 }
+
+func (c *Context) Published() []Message {
+	return c.messages
+}
+
+func (c *Context) MsgWriter() io.Writer {
+	return c.rendered
+}
+
+// Handlers
+
+type (
+	HandlerFunc    = pubsub.HandlerFunc[*Context]
+	MiddlewareFunc = pubsub.MiddlewareFunc[*Context]
+)
+
+func EmptyHandler(c *Context) error {
+	return nil
+}
+
+// Broker
+
+type (
+	Hub   = pubsub.Hub[[]Message]
+	Route = pubsub.Route
+)
+
+const (
+	MethodPub   = pubsub.MethodPub
+	MethodSub   = pubsub.MethodSub
+	MethodUnsub = pubsub.MethodUnsub
+	MethodMsg   = "MSG"
+)
 
 type Broker struct {
-	hub      *pubsub.Hub[[]Message]
-	router   *router
-	maxParam *int
-	logger   Logger
-
-	middleware []MiddlewareFunc
-
-	// This is not guarded by a mutex because it's only used by a single goroutine
-	pubCancellers map[string]stdContext.CancelFunc
-	changes       <-chan pubsub.BroadcastingChange
+	broker *pubsub.Broker[*Context, Message]
+	logger pubsub.Logger
 }
 
-func NewBroker(logger Logger) *Broker {
-	changes := make(chan pubsub.BroadcastingChange)
-	hub := pubsub.NewHub[[]Message](changes)
-	b := &Broker{
-		hub:           hub,
-		changes:       changes,
-		pubCancellers: make(map[string]stdContext.CancelFunc),
-		maxParam:      new(int),
-		logger:        logger,
+func NewBroker(logger pubsub.Logger) *Broker {
+	return &Broker{
+		broker: pubsub.NewBroker[*Context, Message](logger),
+		logger: logger,
 	}
-	b.router = newRouter(b)
-	return b
 }
 
-func (b *Broker) Hub() *pubsub.Hub[[]Message] {
-	return b.hub
-}
-
-// Handler Registration
-
-func (b *Broker) Add(
-	method, topic string, handler HandlerFunc, middleware ...MiddlewareFunc,
-) *Route {
-	// Copied from github.com/labstack/echo's Echo.add method
-	name := handlerName(handler)
-	router := b.router
-	router.Add(method, topic, func(c Context) error {
-		h := applyMiddleware(handler, middleware...)
-		return h(c)
-	})
-	r := &Route{
-		Method: method,
-		Path:   topic,
-		Name:   name,
-	}
-	b.router.routes[method+topic] = r
-	return r
+func (b *Broker) Hub() *Hub {
+	return b.broker.Hub()
 }
 
 func (b *Broker) PUB(topic string, h HandlerFunc, m ...MiddlewareFunc) *Route {
-	return b.Add(MethodPub, topic, h, m...)
+	return b.broker.Add(pubsub.MethodPub, topic, h, m...)
 }
 
 func (b *Broker) SUB(topic string, h HandlerFunc, m ...MiddlewareFunc) *Route {
-	return b.Add(MethodSub, topic, h, m...)
+	return b.broker.Add(pubsub.MethodSub, topic, h, m...)
 }
 
 func (b *Broker) UNSUB(topic string, h HandlerFunc, m ...MiddlewareFunc) *Route {
-	return b.Add(MethodUnsub, topic, h, m...)
+	return b.broker.Add(pubsub.MethodUnsub, topic, h, m...)
 }
 
 func (b *Broker) MSG(topic string, h HandlerFunc, m ...MiddlewareFunc) *Route {
-	return b.Add(MethodMsg, topic, h, m...)
+	return b.broker.Add(MethodMsg, topic, h, m...)
 }
-
-// Middleware
 
 func (b *Broker) Use(middleware ...MiddlewareFunc) {
-	b.middleware = append(b.middleware, middleware...)
+	b.broker.Use(middleware...)
 }
 
-func (b *Broker) getHandler(method string, topic string, c *context) HandlerFunc {
-	b.router.Find(method, topic, c)
-	return applyMiddleware(c.handler, b.middleware...)
-}
-
-// Action Cable Support
-
-func (b *Broker) ChannelFactory(
-	sessionID string, checkers ...actioncable.IdentifierChecker,
-) actioncable.ChannelFactory {
-	return func(identifier string) (actioncable.Channel, error) {
-		return NewChannel(
-			identifier, b.hub,
-			b.subHandler(sessionID), b.unsubHandler(sessionID), b.msgHandler(sessionID), checkers...,
-		)
+func (b *Broker) triggerMsg(
+	ctx context.Context, topic, sessionID string, messages []Message,
+) (rendered string, err error) {
+	c := &Context{
+		brokerContext: b.broker.NewBrokerContext(ctx, MethodMsg, topic),
+		sessionID:     sessionID,
+		messages:      messages,
+		rendered:      &bytes.Buffer{},
 	}
-}
-
-func (b *Broker) newContext(ctx stdContext.Context, topic string) *context {
-	return &context{
-		context: ctx,
-		pvalues: make([]string, *b.maxParam),
-		handler: NotFoundHandler,
-		hub:     b.hub,
-		topic:   topic,
+	h := b.broker.GetHandler(MethodMsg, topic, c.RouterContext())
+	if err := h(c); err != nil && !errors.Is(err, context.Canceled) {
+		b.logger.Error(errors.Wrapf(h(c), "couldn't trigger msg on topic %s", topic))
+		return "", err
 	}
+	return c.rendered.String(), nil
 }
 
-func (b *Broker) subHandler(sessionID string) SubHandler {
-	return func(ctx stdContext.Context, topic string) error {
-		c := b.newContext(ctx, topic)
-		c.method = MethodSub
-		c.sessionID = sessionID
-		h := b.getHandler(MethodSub, topic, c)
-		err := errors.Wrapf(h(c), "turbo streams not subscribable on topic %s", topic)
-		if err != nil && !errors.Is(err, stdContext.Canceled) {
-			b.logger.Error(err)
-		}
-		return err
-	}
-}
-
-func (b *Broker) unsubHandler(sessionID string) UnsubHandler {
-	return func(ctx stdContext.Context, topic string) {
-		c := b.newContext(ctx, topic)
-		c.method = MethodUnsub
-		c.sessionID = sessionID
-		h := b.getHandler(MethodUnsub, topic, c)
-		err := errors.Wrapf(h(c), "turbo streams not unsubscribable on topic %s", topic)
-		if err != nil && !errors.Is(err, stdContext.Canceled) {
-			b.logger.Error(err)
-		}
-	}
-}
-
-func (b *Broker) msgHandler(sessionID string) MsgHandler {
-	return func(ctx stdContext.Context, topic string, messages []Message) (result string, err error) {
-		c := b.newContext(ctx, topic)
-		c.method = MethodMsg
-		c.sessionID = sessionID
-		c.messages = messages
-		c.rendered = &bytes.Buffer{}
-		h := b.getHandler(MethodMsg, topic, c)
-		err = errors.Wrapf(h(c), "turbo streams message not processable on topic %s", topic)
-		if err != nil && !errors.Is(err, stdContext.Canceled) {
-			b.logger.Error(err)
-			return "", err
-		}
-		return c.rendered.String(), nil
-	}
-}
-
-// Managed Publishing
-
-func (b *Broker) startPub(ctx stdContext.Context, topic string) {
-	ctx, canceler := stdContext.WithCancel(ctx)
-	c := b.newContext(ctx, topic)
-	c.method = MethodPub
-	b.pubCancellers[topic] = canceler
-	h := b.getHandler(MethodPub, topic, c)
-	go func() {
-		err := h(c)
-		if err != nil && !errors.Is(err, stdContext.Canceled) {
-			b.logger.Error(err)
-		}
-	}()
-}
-
-func (b *Broker) cancelPub(topic string) {
-	if canceller, ok := b.pubCancellers[topic]; ok {
-		canceller()
-		delete(b.pubCancellers, topic)
-	}
-}
-
-func (b *Broker) Serve(ctx stdContext.Context) error {
-	go func() {
-		<-ctx.Done()
-		b.hub.Close()
-	}()
-	for change := range b.changes {
-		for _, topic := range change.Added {
-			if _, ok := b.pubCancellers[topic]; ok {
-				continue
+func (b *Broker) Subscribe(
+	ctx context.Context, topic, sessionID string,
+	msgConsumer func(ctx context.Context, rendered string) (ok bool),
+) (unsubscriber func(), finished <-chan struct{}) {
+	return b.broker.Subscribe(
+		ctx, topic,
+		func(c *pubsub.BrokerContext[*Context, Message]) *Context {
+			return &Context{
+				brokerContext: c,
+				sessionID:     sessionID,
 			}
-			b.startPub(ctx, topic)
+		},
+		func(ctx context.Context, messages []Message) (ok bool) {
+			rendered, err := b.triggerMsg(ctx, topic, sessionID, messages)
+			if err != nil {
+				b.logger.Error(errors.Wrapf(err, "msg handler on topic %s failed", topic))
+				return false
+			}
+			return msgConsumer(ctx, rendered)
+		},
+	)
+}
+
+func (b *Broker) Serve(ctx context.Context) error {
+	return b.broker.Serve(ctx, func(c *pubsub.BrokerContext[*Context, Message]) *Context {
+		return &Context{
+			brokerContext: c,
 		}
-		for _, topic := range change.Removed {
-			b.cancelPub(topic)
-		}
-	}
-	return ctx.Err()
+	})
+}
+
+type Router interface {
+	pubsub.Router[*Context]
+	MSG(topic string, h HandlerFunc, m ...MiddlewareFunc) *Route
 }

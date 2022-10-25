@@ -20,31 +20,44 @@ type receiver[Message any] struct {
 
 // Hub
 
+type BroadcastingChange struct {
+	Added   []string
+	Removed []string
+}
+
 type Hub[Message any] struct {
-	receivers map[string]map[*receiver[Message]]bool
+	receivers map[string]map[*receiver[Message]]struct{}
 	mu        sync.RWMutex
 	brChanges chan<- BroadcastingChange
 }
 
 func NewHub[Message any](brChanges chan<- BroadcastingChange) *Hub[Message] {
 	return &Hub[Message]{
-		receivers: make(map[string]map[*receiver[Message]]bool),
+		receivers: make(map[string]map[*receiver[Message]]struct{}),
 		brChanges: brChanges,
 	}
 }
 
 func (h *Hub[Message]) Close() {
+	h.mu.Lock() // lock to prevent data race with the Subscribe method sending to brChanges
+	defer h.mu.Unlock()
+
+	for _, broadcasting := range h.receivers {
+		for receiver := range broadcasting {
+			receiver.cancel()
+		}
+	}
+
 	if h.brChanges != nil {
 		close(h.brChanges)
 	}
-	// FIXME: we should also prevent further subscriptions and publications, unsubscribe everyone,
-	// etc.
+	h.brChanges = nil
 }
 
 func (h *Hub[Message]) Subscribe(
 	topic string, receive ReceiveFunc[Message],
 ) (unsubscriber func(), removed <-chan struct{}) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) // FIXME: enable setting parent context?
 	r := &receiver[Message]{
 		topic:   topic,
 		receive: receive,
@@ -57,11 +70,11 @@ func (h *Hub[Message]) Subscribe(
 	broadcasting, ok := h.receivers[topic]
 	addedTopic := false
 	if !ok {
-		broadcasting = make(map[*receiver[Message]]bool)
+		broadcasting = make(map[*receiver[Message]]struct{})
 		h.receivers[r.topic] = broadcasting
 		addedTopic = true
 	}
-	broadcasting[r] = true
+	broadcasting[r] = struct{}{}
 
 	if h.brChanges != nil && addedTopic {
 		h.brChanges <- BroadcastingChange{Added: []string{topic}}

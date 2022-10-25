@@ -1,7 +1,7 @@
 package turbostreams
 
 import (
-	stdContext "context"
+	"context"
 	"encoding/json"
 
 	"github.com/pkg/errors"
@@ -12,21 +12,17 @@ import (
 
 const ChannelName = "Turbo::StreamsChannel"
 
-type (
-	SubHandler   func(ctx stdContext.Context, streamName string) error
-	UnsubHandler func(ctx stdContext.Context, streamName string)
-	MsgHandler   func(
-		ctx stdContext.Context, streamName string, messages []Message,
-	) (result string, err error)
-)
+type subscriber func(
+	ctx context.Context, topic, sessionID string,
+	msgConsumer func(ctx context.Context, rendred string) (ok bool),
+) (unsubscriber func(), finished <-chan struct{})
 
 type Channel struct {
-	identifier  string
-	streamName  string
-	h           *pubsub.Hub[[]Message]
-	handleSub   SubHandler
-	handleUnsub UnsubHandler
-	handleMsg   MsgHandler
+	identifier string
+	streamName string
+	h          *pubsub.Hub[[]Message]
+	subscriber subscriber
+	sessionID  string
 }
 
 func parseStreamName(identifier string) (string, error) {
@@ -40,8 +36,7 @@ func parseStreamName(identifier string) (string, error) {
 }
 
 func NewChannel(
-	identifier string, h *pubsub.Hub[[]Message],
-	handleSub SubHandler, handleUnsub UnsubHandler, handleMsg MsgHandler,
+	identifier string, h *pubsub.Hub[[]Message], subscriber subscriber, sessionID string,
 	checkers ...actioncable.IdentifierChecker,
 ) (*Channel, error) {
 	name, err := parseStreamName(identifier)
@@ -54,17 +49,16 @@ func NewChannel(
 		}
 	}
 	return &Channel{
-		identifier:  identifier,
-		streamName:  name,
-		h:           h,
-		handleSub:   handleSub,
-		handleUnsub: handleUnsub,
-		handleMsg:   handleMsg,
+		identifier: identifier,
+		streamName: name,
+		h:          h,
+		subscriber: subscriber,
+		sessionID:  sessionID,
 	}, nil
 }
 
 func (c *Channel) Subscribe(
-	ctx stdContext.Context, sub actioncable.Subscription,
+	ctx context.Context, sub actioncable.Subscription,
 ) (unsubscriber func(), err error) {
 	if sub.Identifier() != c.identifier {
 		return nil, errors.Errorf(
@@ -72,32 +66,14 @@ func (c *Channel) Subscribe(
 			c.identifier, sub.Identifier(),
 		)
 	}
-	if err := c.handleSub(ctx, c.streamName); err != nil {
-		return nil, nil // since subscribing isn't possible/authorized, reject the subscription
-	}
-	ctx, cancel := stdContext.WithCancel(ctx)
-	unsub, removed := c.h.Subscribe(c.streamName, func(messages []Message) (ok bool) {
-		if ctx.Err() != nil {
-			return false
-		}
-		result, err := c.handleMsg(ctx, c.streamName, messages)
-		if err != nil {
-			cancel()
-			sub.Close()
-			return false
-		}
-		return sub.Receive(result)
-	})
+
+	cancel, finished := c.subscriber(
+		ctx, c.streamName, c.sessionID, func(ctx context.Context, rendered string) (ok bool) {
+			return sub.Receive(rendered)
+		},
+	)
 	go func() {
-		select {
-		case <-ctx.Done():
-			break
-		case <-removed:
-			break
-		}
-		cancel()
-		unsub()
-		c.handleUnsub(ctx, c.streamName)
+		<-finished
 		sub.Close()
 	}()
 	return cancel, nil
@@ -105,4 +81,12 @@ func (c *Channel) Subscribe(
 
 func (c *Channel) Perform(data string) error {
 	return errors.New("turbo streams channel cannot perform any actions")
+}
+
+func NewChannelFactory(
+	b *Broker, sessionID string, checkers ...actioncable.IdentifierChecker,
+) actioncable.ChannelFactory {
+	return func(identifier string) (actioncable.Channel, error) {
+		return NewChannel(identifier, b.Hub(), b.Subscribe, sessionID, checkers...)
+	}
 }
