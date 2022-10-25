@@ -4,9 +4,9 @@ import (
 	"context"
 )
 
-func Consume[T any](
-	ctx context.Context, ch <-chan T, f func(elem T) (done bool, err error),
-) error {
+type Consumer[T any] func(elem T) (done bool, err error)
+
+func Consume[T any](ctx context.Context, ch <-chan T, f Consumer[T]) error {
 	for {
 		select {
 		case <-ctx.Done():

@@ -2,6 +2,7 @@ package pubsub
 
 import (
 	"context"
+	"net/url"
 
 	"github.com/pkg/errors"
 )
@@ -71,6 +72,14 @@ func (c *BrokerContext[HandlerContext, Message]) ParamNames() []string {
 
 func (c *BrokerContext[HandlerContext, Message]) ParamValues() []string {
 	return c.routerContext.ParamValues()
+}
+
+func (c *BrokerContext[HandlerContext, Message]) Query() (url.Values, error) {
+	topic, err := url.ParseRequestURI(c.Topic())
+	if err != nil {
+		return nil, errors.Wrapf(err, "couldn't parse topic %s as request URI", c.Topic())
+	}
+	return topic.Query(), nil
 }
 
 func (c *BrokerContext[HandlerContext, Message]) Hub() *Hub[[]Message] {
@@ -163,7 +172,11 @@ func (b *Broker[HandlerContext, Message]) Use(middleware ...MiddlewareFunc[Handl
 func (b *Broker[HandlerContext, Message]) GetHandler(
 	method string, topic string, c *RouterContext[HandlerContext],
 ) HandlerFunc[HandlerContext] {
-	b.router.Find(method, topic, c)
+	if u, err := url.ParseRequestURI(topic); err == nil {
+		b.router.Find(method, u.Path, c)
+	} else {
+		b.router.Find(method, topic, c)
+	}
 	return applyMiddleware(c.handler, b.middleware...)
 }
 
