@@ -90,6 +90,10 @@ func (c *BrokerContext[HandlerContext, Message]) Publish(messages ...Message) {
 	c.hub.Broadcast(c.topic, messages)
 }
 
+func (c *BrokerContext[HandlerContext, Message]) Broadcast(topic string, messages ...Message) {
+	c.hub.Broadcast(topic, messages)
+}
+
 // Broker
 
 type Broker[HandlerContext Context, Message any] struct {
