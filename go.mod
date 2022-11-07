@@ -5,7 +5,7 @@ go 1.19
 require (
 	github.com/alexedwards/argon2id v0.0.0-20211130144151-3585854a6387
 	github.com/benbjohnson/hashfs v0.2.1
-	github.com/bmatcuk/doublestar/v4 v4.2.0
+	github.com/bmatcuk/doublestar/v4 v4.3.2
 	github.com/dgraph-io/ristretto v0.1.1
 	github.com/gorilla/csrf v1.7.1
 	github.com/gorilla/securecookie v1.1.1
