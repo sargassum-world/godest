@@ -12,7 +12,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func computeCSPHash(resource []byte) string {
+func ComputeCSPHash(resource []byte) string {
 	rawHash := sha512.Sum512(resource)
 	encodedHash := base64.StdEncoding.EncodeToString(rawHash[:])
 	return fmt.Sprintf("'sha512-%s'", encodedHash)
@@ -174,7 +174,7 @@ type Inlines struct {
 func (i Inlines) ComputeCSSHashesForCSP() (hashes []string) {
 	hashes = make([]string, 0, len(i.CSS))
 	for _, inline := range i.CSS {
-		hashes = append(hashes, computeCSPHash([]byte(inline)))
+		hashes = append(hashes, ComputeCSPHash([]byte(inline)))
 	}
 	return hashes
 }
@@ -182,7 +182,7 @@ func (i Inlines) ComputeCSSHashesForCSP() (hashes []string) {
 func (i Inlines) ComputeJSHashesForCSP() (hashes []string) {
 	hashes = make([]string, 0, len(i.CSS))
 	for _, inline := range i.JS {
-		hashes = append(hashes, computeCSPHash([]byte(inline)))
+		hashes = append(hashes, ComputeCSPHash([]byte(inline)))
 	}
 	return hashes
 }
