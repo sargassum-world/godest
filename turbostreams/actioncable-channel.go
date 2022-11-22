@@ -14,7 +14,7 @@ const ChannelName = "Turbo::StreamsChannel"
 
 type subscriber func(
 	ctx context.Context, topic, sessionID string,
-	msgConsumer func(ctx context.Context, rendred string) (ok bool),
+	msgConsumer func(ctx context.Context, rendered string) (ok bool),
 ) (unsubscriber func(), finished <-chan struct{})
 
 type Channel struct {

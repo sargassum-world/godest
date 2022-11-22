@@ -19,7 +19,9 @@ func (s Subscription) Receive(message string) (ok bool) {
 }
 
 func (s Subscription) Close() {
-	s.toClient <- newSubscriptionRejection(s.identifier)
-	// We leave the toClient channel open because other goroutines and Subscriptions should still be
-	// able to send into it
+	// We don't send a subscription rejection, because the @anycable/web client in t he browser
+	// expects no subscription rejection when it unsubscribes normally. Refer to
+	// https://docs.anycable.io/misc/action_cable_protocol?id=subscriptions-amp-identifiers
+	// Also, we leave the toClient channel open because other goroutines and Subscriptions should
+	// still be able to send into it.
 }
