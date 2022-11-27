@@ -7,95 +7,8 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Context
-
-// Logger is a reduced interface for loggers.
-type Logger interface {
-	Print(i ...interface{})
-	Printf(format string, args ...interface{})
-	Debug(i ...interface{})
-	Debugf(format string, args ...interface{})
-	Info(i ...interface{})
-	Infof(format string, args ...interface{})
-	Warn(i ...interface{})
-	Warnf(format string, args ...interface{})
-	Error(i ...interface{})
-	Errorf(format string, args ...interface{})
-	Fatal(i ...interface{})
-	Fatalf(format string, args ...interface{})
-	Panic(i ...interface{})
-	Panicf(format string, args ...interface{})
-}
-
-type BrokerContext[HandlerContext Context, Message any] struct {
-	context context.Context
-	logger  Logger
-
-	method string
-	topic  string
-
-	routerContext *RouterContext[HandlerContext]
-	hub           *Hub[[]Message]
-}
-
-func (c *BrokerContext[HandlerContext, Message]) Context() context.Context {
-	return c.context
-}
-
-func (c *BrokerContext[HandlerContext, Message]) Logger() Logger {
-	return c.logger
-}
-
-func (c *BrokerContext[HandlerContext, Message]) Method() string {
-	return c.method
-}
-
-func (c *BrokerContext[HandlerContext, Message]) Topic() string {
-	return c.topic
-}
-
-func (c *BrokerContext[HandlerContext, Message]) RouterContext() *RouterContext[HandlerContext] {
-	return c.routerContext
-}
-
-func (c *BrokerContext[HandlerContext, Message]) Path() string {
-	return c.routerContext.path
-}
-
-func (c *BrokerContext[HandlerContext, Message]) Param(name string) string {
-	return c.routerContext.Param(name)
-}
-
-func (c *BrokerContext[HandlerContext, Message]) ParamNames() []string {
-	return c.routerContext.ParamNames()
-}
-
-func (c *BrokerContext[HandlerContext, Message]) ParamValues() []string {
-	return c.routerContext.ParamValues()
-}
-
-func (c *BrokerContext[HandlerContext, Message]) Query() (url.Values, error) {
-	topic, err := url.ParseRequestURI(c.Topic())
-	if err != nil {
-		return nil, errors.Wrapf(err, "couldn't parse topic %s as request URI", c.Topic())
-	}
-	return topic.Query(), nil
-}
-
-func (c *BrokerContext[HandlerContext, Message]) Hub() *Hub[[]Message] {
-	return c.hub
-}
-
-func (c *BrokerContext[HandlerContext, Message]) Publish(messages ...Message) {
-	c.hub.Broadcast(c.topic, messages)
-}
-
-func (c *BrokerContext[HandlerContext, Message]) Broadcast(topic string, messages ...Message) {
-	c.hub.Broadcast(topic, messages)
-}
-
-// Broker
-
+// Broker is the top-level pub-sub framework for routing pub-sub events to handlers. Analogous to
+// Echo's Echo.
 type Broker[HandlerContext Context, Message any] struct {
 	hub      *Hub[[]Message]
 	router   *HandlerRouter[HandlerContext]
@@ -109,9 +22,10 @@ type Broker[HandlerContext Context, Message any] struct {
 	changes      <-chan BroadcastingChange
 }
 
+// NewBroker creates an instance of [Broker].
 func NewBroker[HandlerContext Context, Message any](logger Logger) *Broker[HandlerContext, Message] {
 	changes := make(chan BroadcastingChange)
-	hub := NewHub[[]Message](changes)
+	hub := NewHub[[]Message](changes, logger)
 	maxParam := new(int)
 	return &Broker[HandlerContext, Message]{
 		hub:          hub,
@@ -123,12 +37,15 @@ func NewBroker[HandlerContext Context, Message any](logger Logger) *Broker[Handl
 	}
 }
 
+// Hub returns the associated pub-sub [Hub].
 func (b *Broker[HandlerContext, Message]) Hub() *Hub[[]Message] {
 	return b.hub
 }
 
 // Handler Registration
 
+// Add registers a new route for a pub-sub broker event method and topic with matching handler in
+// the router, with optional route-level middleware. Analogous to Echo's Echo.Add.
 func (b *Broker[HandlerContext, Message]) Add(
 	method, topic string, handler HandlerFunc[HandlerContext],
 	middleware ...MiddlewareFunc[HandlerContext],
@@ -149,18 +66,24 @@ func (b *Broker[HandlerContext, Message]) Add(
 	return r
 }
 
+// PUB registers a new PUB route for a topic with matching handler in the router, with optional
+// route-level middleware. Refer to [Broker.Serve] for details on how PUB handlers are used.
 func (b *Broker[HandlerContext, Message]) PUB(
 	topic string, h HandlerFunc[HandlerContext], m ...MiddlewareFunc[HandlerContext],
 ) *Route {
 	return b.Add(MethodPub, topic, h, m...)
 }
 
+// SUB registers a new SUB route for a topic with matching handler in the router, with optional
+// route-level middleware. Refer to [Broker.Subscribe] for details on how SUB handlers are used.
 func (b *Broker[HandlerContext, Message]) SUB(
 	topic string, h HandlerFunc[HandlerContext], m ...MiddlewareFunc[HandlerContext],
 ) *Route {
 	return b.Add(MethodSub, topic, h, m...)
 }
 
+// UNSUB registers a new UNSUB route for a topic with matching handler in the router, with optional
+// route-level middleware. Refer to [Broker.Subscribe] for details on how UNSUB handlers are used.
 func (b *Broker[HandlerContext, Message]) UNSUB(
 	topic string, h HandlerFunc[HandlerContext], m ...MiddlewareFunc[HandlerContext],
 ) *Route {
@@ -169,10 +92,15 @@ func (b *Broker[HandlerContext, Message]) UNSUB(
 
 // Middleware
 
+// Use adds middleware to the chain which is run after the router. Analogous to Echo's Echo.Use.
 func (b *Broker[HandlerContext, Message]) Use(middleware ...MiddlewareFunc[HandlerContext]) {
 	b.middleware = append(b.middleware, middleware...)
 }
 
+// GetHandler returns the handler associated in the router with the method and topic,
+// with middleware (specified by [Broker.Use]) applied afterwards, and with the provided router
+// context modified based on routing results. This is useful in combination with
+// [Broker.NewBrokerContext] for triggering handlers for custom pub-sub broker event methods.
 func (b *Broker[HandlerContext, Message]) GetHandler(
 	method string, topic string, c *RouterContext[HandlerContext],
 ) HandlerFunc[HandlerContext] {
@@ -186,6 +114,8 @@ func (b *Broker[HandlerContext, Message]) GetHandler(
 
 // Handler Triggering
 
+// NewBrokerContext creates a new pub-sub broker event context. This is useful in combination with
+// [Broker.GetHandler] for triggering handlers for custom pub-sub broker event methods.
 func (b *Broker[HandlerContext, Message]) NewBrokerContext(
 	ctx context.Context, method, topic string,
 ) *BrokerContext[HandlerContext, Message] {
@@ -203,10 +133,13 @@ func (b *Broker[HandlerContext, Message]) NewBrokerContext(
 	}
 }
 
+// HandlerContextMaker is a function for creating a HandlerContext instance from a [BrokerContext]
+// instance created by [Broker.NewBrokerContext].
 type HandlerContextMaker[HandlerContext Context, Message any] func(
 	c *BrokerContext[HandlerContext, Message],
 ) HandlerContext
 
+// TriggerSub looks up and runs the SUB handler associated with the topic.
 func (b *Broker[HandlerContext, Message]) TriggerSub(
 	ctx context.Context, topic string, hc HandlerContextMaker[HandlerContext, Message],
 ) error {
@@ -219,6 +152,7 @@ func (b *Broker[HandlerContext, Message]) TriggerSub(
 	return nil
 }
 
+// TriggerUnsub looks up and runs the UNSUB handler associated with the topic.
 func (b *Broker[HandlerContext, Message]) TriggerUnsub(
 	ctx context.Context, topic string, hc HandlerContextMaker[HandlerContext, Message],
 ) {
@@ -229,6 +163,9 @@ func (b *Broker[HandlerContext, Message]) TriggerUnsub(
 	}
 }
 
+// TriggerPub looks up and launches a goroutine running the PUB handler associated with the topic.
+// It returns an error if the handler for that topic already started but has not yet been canceled
+// by a call to [Broker.CancelPub]. Useful for writing alternatives to [Broker.Serve].
 func (b *Broker[HandlerContext, Message]) TriggerPub(
 	ctx context.Context, topic string, hc HandlerContextMaker[HandlerContext, Message],
 ) error {
@@ -248,6 +185,8 @@ func (b *Broker[HandlerContext, Message]) TriggerPub(
 	return nil
 }
 
+// CancelPub cancels the PUB handler goroutine for the topic started by [Broker.TriggerPub].
+// Useful for writing alternatives to [Broker.Serve].
 func (b *Broker[HandlerContext, Message]) CancelPub(topic string) {
 	if canceller, ok := b.pubCancelers[topic]; ok {
 		canceller()
@@ -255,42 +194,45 @@ func (b *Broker[HandlerContext, Message]) CancelPub(topic string) {
 	}
 }
 
+// Subscribe runs the SUB handler for the topic and, if it does not produce an error, adds a
+// subscription to the broker's Hub with a callback function to handle messages broadcast over the
+// broker's Hub. When the context is canceled, the UNSUB handler is run. Any messages published on
+// the broker's Hub (e.g. messages broadcast from [Context.Publish], [Context.Broadcast], or
+// [Hub.Broadcast]) will be passed to the broadcast handler callback function.
 func (b *Broker[HandlerContext, Message]) Subscribe(
 	ctx context.Context, topic string, hc HandlerContextMaker[HandlerContext, Message],
-	broadcastHandler func(ctx context.Context, messages []Message) (ok bool),
-) (unsubscriber func(), finished <-chan struct{}) {
+	broadcastHandler func(ctx context.Context, messages []Message) error,
+) (finished <-chan struct{}) {
 	if err := b.TriggerSub(ctx, topic, hc); err != nil {
-		return nil, nil // since subscribing isn't possible/authorized, reject the subscription
+		return nil
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	unsub, removed := b.hub.Subscribe(topic, func(messages []Message) (ok bool) {
-		if ctx.Err() != nil {
-			return false
+	cctx, cancel := context.WithCancel(ctx)
+	removed := b.hub.Subscribe(cctx, topic, func(messages []Message) error {
+		if err := cctx.Err(); err != nil {
+			return err
 		}
-		if ok := broadcastHandler(ctx, messages); !ok {
+		if err := broadcastHandler(cctx, messages); err != nil {
 			cancel()
-			return false
+			return err
 		}
-		return true
+		return nil
 	})
-	done := make(chan struct{})
 	go func() {
-		select {
-		case <-ctx.Done():
-			break
-		case <-removed:
-			break
-		}
-		cancel()
-		unsub()
-		b.TriggerUnsub(ctx, topic, hc)
-		close(done)
+		<-removed
+		b.TriggerUnsub(cctx, topic, hc)
 	}()
-	return cancel, done
+	return removed
 }
 
 // Managed Publishing
 
+// Serve launches and cancels PUB handlers based on the appearance and disappearance of
+// subscriptions for the PUB handlers' corresponding topics. The PUB handler for a topic is started
+// in a goroutine when a new subscription is added to the broker (or to the broker's Hub) on a topic
+// which previously did not have associated subscriptions; and its context is canceled upon removal
+// of the only remaining subscription for the topic. This way, exactly one instance of the PUB
+// handler for a topic is run exactly when there is at least one subscriber on that topic.
+// The Broker should not be used after the Serve method finishes running.
 func (b *Broker[HandlerContext, Message]) Serve(
 	ctx context.Context, hc HandlerContextMaker[HandlerContext, Message],
 ) error {
@@ -316,6 +258,7 @@ func (b *Broker[HandlerContext, Message]) Serve(
 
 // Router Interface
 
+// Router is the subset of [Broker] methods for adding handlers to routes.
 type Router[HandlerContext Context] interface {
 	PUB(topic string, h HandlerFunc[HandlerContext], m ...MiddlewareFunc[HandlerContext]) *Route
 	SUB(topic string, h HandlerFunc[HandlerContext], m ...MiddlewareFunc[HandlerContext]) *Route

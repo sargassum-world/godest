@@ -10,13 +10,16 @@ import (
 	"github.com/sargassum-world/godest/pubsub"
 )
 
+// ChannelName is the name of the Action Cable channel for Turbo Streams.
 const ChannelName = "Turbo::StreamsChannel"
 
+// subscriber creates a subscription for the channel, to integrate [Channel] with [Broker].
 type subscriber func(
 	ctx context.Context, topic, sessionID string,
-	msgConsumer func(ctx context.Context, rendered string) (ok bool),
-) (unsubscriber func(), finished <-chan struct{})
+	msgConsumer func(ctx context.Context, rendered string) error,
+) (finished <-chan struct{})
 
+// Channel represents an Action Cable channel for a Turbo Streams stream.
 type Channel struct {
 	identifier string
 	streamName string
@@ -25,16 +28,21 @@ type Channel struct {
 	sessionID  string
 }
 
+// parseStreamName parses the Turbo Streams stream name from the Action Cable subscription
+// identifier.
 func parseStreamName(identifier string) (string, error) {
 	var i struct {
 		Name string `json:"name"`
 	}
 	if err := json.Unmarshal([]byte(identifier), &i); err != nil {
-		return "", errors.Wrap(err, "couldn't parse stream name from identifier")
+		return "", errors.Wrap(
+			err, "couldn't parse stream name from action cable subscription identifier",
+		)
 	}
 	return i.Name, nil
 }
 
+// NewChannel checks the identifier with the specified checkers and returns a new Channel instance.
 func NewChannel(
 	identifier string, h *pubsub.Hub[[]Message], subscriber subscriber, sessionID string,
 	checkers ...actioncable.IdentifierChecker,
@@ -45,7 +53,7 @@ func NewChannel(
 	}
 	for _, checker := range checkers {
 		if err := checker(identifier); err != nil {
-			return nil, errors.Wrap(err, "stream identifier failed checks")
+			return nil, errors.Wrap(err, "action cable subscription identifier failed checks")
 		}
 	}
 	return &Channel{
@@ -57,32 +65,35 @@ func NewChannel(
 	}, nil
 }
 
-func (c *Channel) Subscribe(
-	ctx context.Context, sub actioncable.Subscription,
-) (unsubscriber func(), err error) {
+// Subscribe handles an Action Cable subscribe command from the client with the provided
+// [actioncable.Subscription].
+func (c *Channel) Subscribe(ctx context.Context, sub actioncable.Subscription) error {
 	if sub.Identifier() != c.identifier {
-		return nil, errors.Errorf(
+		return errors.Errorf(
 			"channel identifier %+v does not match subscription identifier %+v",
 			c.identifier, sub.Identifier(),
 		)
 	}
 
-	cancel, finished := c.subscriber(
-		ctx, c.streamName, c.sessionID, func(ctx context.Context, rendered string) (ok bool) {
-			return sub.Receive(rendered)
+	finished := c.subscriber(
+		ctx, c.streamName, c.sessionID, func(ctx context.Context, rendered string) error {
+			return sub.Send(rendered)
 		},
 	)
 	go func() {
 		<-finished
 		sub.Close()
 	}()
-	return cancel, nil
+	return nil
 }
 
+// Perform handles an Action Cable action command from the client.
 func (c *Channel) Perform(data string) error {
 	return errors.New("turbo streams channel cannot perform any actions")
 }
 
+// NewChannelFactory creates an [actioncable.ChannelFactory] for Turbo Streams to create channels
+// for different Turbo Streams streams as needed.
 func NewChannelFactory(
 	b *Broker, sessionID string, checkers ...actioncable.IdentifierChecker,
 ) actioncable.ChannelFactory {

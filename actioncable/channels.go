@@ -6,69 +6,94 @@ import (
 	"github.com/pkg/errors"
 )
 
+// Channel represents a server-side Action Cable channel.
 type Channel interface {
-	Subscribe(ctx context.Context, sub Subscription) (unsubscriber func(), err error)
+	// Subscribe handles an Action Cable subscribe command from the client with the provided
+	// [Subscription].
+	Subscribe(ctx context.Context, sub Subscription) error
+	// Perform handles an Action Cable action command from the client.
 	Perform(data string) error
 }
 
+// ChannelFactory creates a Channel from an Action Cable subscription identifier.
 type ChannelFactory func(identifier string) (Channel, error)
 
-func HandleSubscription(
-	factories map[string]ChannelFactory, channels map[string]Channel, checkers ...IdentifierChecker,
-) SubscriptionHandler {
-	return func(ctx context.Context, sub Subscription) (unsubscriber func(), err error) {
-		if channel, ok := channels[sub.Identifier()]; ok {
-			unsubscriber, err = channel.Subscribe(ctx, sub)
-			if unsubscriber == nil || err != nil {
-				delete(channels, sub.Identifier())
-				return nil, errors.Wrapf(err, "couldn't re-subscribe to %s", sub.Identifier())
-			}
-			return unsubscriber, nil
-		}
+// ChannelDispatcher manages channels, channel subscriptions, and channel actions.
+type ChannelDispatcher struct {
+	factories map[string]ChannelFactory
+	channels  map[string]Channel
+	checkers  []IdentifierChecker
+}
 
-		channelName, err := parseChannelName(sub.Identifier())
-		if err != nil {
-			return nil, err
-		}
-		for _, checker := range checkers {
-			if err = checker(sub.Identifier()); err != nil {
-				return nil, errors.Wrap(err, "channel identifier failed check")
-			}
-		}
-		factory, ok := factories[channelName]
-		if !ok {
-			return nil, errors.Errorf("unknown channel name %s", channelName)
-		}
-		channel, err := factory(sub.Identifier())
-		if err != nil {
-			return nil, errors.Wrapf(err, "couldn't instantiate %s", sub.Identifier())
-		}
-		// The Subscribe method checks whether the subscription is possible, so we must check it before
-		// storing the channel.
-		unsubscriber, err = channel.Subscribe(ctx, sub)
-		if unsubscriber == nil || err != nil {
-			return nil, errors.Wrapf(err, "couldn't subscribe to %s", sub.Identifier())
-		}
-		channels[sub.Identifier()] = channel
-		return unsubscriber, nil
+func NewChannelDispatcher(
+	factories map[string]ChannelFactory, channels map[string]Channel, checkers ...IdentifierChecker,
+) *ChannelDispatcher {
+	return &ChannelDispatcher{
+		factories: factories,
+		channels:  channels,
+		checkers:  checkers,
 	}
 }
 
-func HandleAction(channels map[string]Channel) ActionHandler {
-	return func(ctx context.Context, identifier, data string) error {
-		channel, ok := channels[identifier]
-		if !ok {
-			return errors.Errorf("no preexisting subscription on %s", identifier)
-		}
-		return channel.Perform(data)
+// parseSubIdentifier parses and checks the subscription identifier.
+func (d *ChannelDispatcher) parseSubIdentifier(identifier string) (channelName string, err error) {
+	channelName, err = parseChannelName(identifier)
+	if err != nil {
+		return "", err
 	}
+	for _, checker := range d.checkers {
+		if err = checker(identifier); err != nil {
+			return "", errors.Wrapf(
+				err, "subscription identifier for channel %s failed check", channelName,
+			)
+		}
+	}
+	return channelName, nil
 }
 
-func WithChannels(
-	factories map[string]ChannelFactory, channels map[string]Channel, checkers ...IdentifierChecker,
-) ConnOption {
-	return func(conn *Conn) {
-		conn.sh = HandleSubscription(factories, channels, checkers...)
-		conn.ah = HandleAction(channels)
+// HandleSubscription associates the subscription to its corresponding channel and calls the
+// channel's Subscribe method, first instantiating the channel if necessary.
+func (d *ChannelDispatcher) HandleSubscription(ctx context.Context, sub Subscription) error {
+	if channel, ok := d.channels[sub.Identifier()]; ok {
+		// The channel already exists, so we just subscribe to it again
+		if err := channel.Subscribe(ctx, sub); err != nil {
+			delete(d.channels, sub.Identifier())
+			return errors.Wrapf(err, "couldn't re-subscribe to %s", sub.Identifier())
+		}
+		return nil
 	}
+	channelName, err := d.parseSubIdentifier(sub.Identifier())
+	if err != nil {
+		return err
+	}
+
+	// Create channel
+	factory, ok := d.factories[channelName]
+	if !ok {
+		return errors.Errorf("unknown channel name %s", channelName)
+	}
+	channel, err := factory(sub.Identifier())
+	if err != nil {
+		return errors.Wrapf(
+			err, "couldn't instantiate channel %s for subscription %s", channelName, sub.Identifier(),
+		)
+	}
+
+	// Subscribe to the channel
+	// The Subscribe method checks whether the subscription is possible, so we must check it before
+	// storing the channel.
+	if err = channel.Subscribe(ctx, sub); err != nil {
+		return errors.Wrapf(err, "couldn't subscribe to %s", sub.Identifier())
+	}
+	d.channels[sub.Identifier()] = channel
+	return nil
+}
+
+// HandleAction dispatches Action Cable action messages to the appropriate channels.
+func (d *ChannelDispatcher) HandleAction(ctx context.Context, identifier, data string) error {
+	channel, ok := d.channels[identifier]
+	if !ok {
+		return errors.Errorf("no preexisting subscription on %s", identifier)
+	}
+	return channel.Perform(data)
 }
