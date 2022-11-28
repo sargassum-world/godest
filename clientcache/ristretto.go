@@ -5,11 +5,13 @@ import (
 
 	"github.com/dgraph-io/ristretto"
 	"github.com/pkg/errors"
+
+	"github.com/sargassum-world/godest/marshaling"
 )
 
 type RistrettoCache struct {
-	cache      *ristretto.Cache
-	marshaller Marshaller
+	cache     *ristretto.Cache
+	marshaler marshaling.Marshaler
 }
 
 func NewRistrettoCache(cacheConfig ristretto.Config) (Cache, error) {
@@ -18,11 +20,11 @@ func NewRistrettoCache(cacheConfig ristretto.Config) (Cache, error) {
 		return nil, err
 	}
 
-	marshaller := NewMsgPackMarshaller()
+	marshaler := marshaling.MessagePack{}
 
 	return &RistrettoCache{
-		cache:      cache,
-		marshaller: &marshaller,
+		cache:     cache,
+		marshaler: marshaler,
 	}, nil
 }
 
@@ -33,7 +35,7 @@ func computeCacheCost(costWeight float32, bytes []byte) int64 {
 func (c *RistrettoCache) SetEntry(
 	key string, value interface{}, costWeight float32, ttl time.Duration,
 ) error {
-	marshaled, err := c.marshaller.Marshal(value)
+	marshaled, err := c.marshaler.Marshal(value)
 	if err != nil {
 		return errors.Wrapf(err, "couldn't marshal value for key %s", key)
 	}
@@ -74,7 +76,7 @@ func (c *RistrettoCache) GetEntry(key string, value interface{}) (bool, bool, er
 	case nonexistentValue:
 		return true, false, nil
 	case []byte:
-		if err := c.marshaller.Unmarshal(marshaledBytes, value); err != nil {
+		if err := c.marshaler.Unmarshal(marshaledBytes, value); err != nil {
 			return true, true, errors.Wrapf(err, "couldn't unmarshal value for key %s", key)
 		}
 

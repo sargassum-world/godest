@@ -10,7 +10,7 @@ import (
 type Channel interface {
 	// Subscribe handles an Action Cable subscribe command from the client with the provided
 	// [Subscription].
-	Subscribe(ctx context.Context, sub Subscription) error
+	Subscribe(ctx context.Context, sub *Subscription) error
 	// Perform handles an Action Cable action command from the client.
 	Perform(data string) error
 }
@@ -53,7 +53,7 @@ func (d *ChannelDispatcher) parseSubIdentifier(identifier string) (channelName s
 
 // HandleSubscription associates the subscription to its corresponding channel and calls the
 // channel's Subscribe method, first instantiating the channel if necessary.
-func (d *ChannelDispatcher) HandleSubscription(ctx context.Context, sub Subscription) error {
+func (d *ChannelDispatcher) HandleSubscription(ctx context.Context, sub *Subscription) error {
 	if channel, ok := d.channels[sub.Identifier()]; ok {
 		// The channel already exists, so we just subscribe to it again
 		if err := channel.Subscribe(ctx, sub); err != nil {

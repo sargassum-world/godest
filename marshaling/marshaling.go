@@ -1,30 +1,30 @@
-package clientcache
+// Package marshaling provides a uniform thread-safe interface to various encoding/decoding formats
+// such as Gob, JSON, and MessagePack, following the JSON marshal/unmarshal function interface.
+package marshaling
 
 import (
 	"bytes"
 	"encoding/gob"
+	"encoding/json"
 
 	"github.com/pkg/errors"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-type Marshaller interface {
-	Marshal(value interface{}) ([]byte, error)
-	Unmarshal(marshaled []byte, result interface{}) error
+type Marshaler interface {
+	Marshal(value any) ([]byte, error)
+	Unmarshal(marshaled []byte, result any) error
 }
 
 // Gob
 
-type GobMarshaller struct { // The Gob marshaller would be faster if it reused the encoder and decoder, instead of
+type Gob struct {
+	// The Gob marshaler would be faster if it reused the encoder and decoder, instead of
 	// constructing new ones on each method call. However, then it wouldn't be concurrency-safe.
 	// We prefer to use MsgPack because it's probably faster anyways.
 }
 
-func NewGobMarshaller() GobMarshaller {
-	return GobMarshaller{}
-}
-
-func (m *GobMarshaller) Marshal(value interface{}) ([]byte, error) {
+func (m Gob) Marshal(value any) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := gob.NewEncoder(&buf)
 	if err := enc.Encode(value); err != nil {
@@ -33,7 +33,7 @@ func (m *GobMarshaller) Marshal(value interface{}) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (m *GobMarshaller) Unmarshal(marshaled []byte, result interface{}) error {
+func (m Gob) Unmarshal(marshaled []byte, result any) error {
 	buf := bytes.NewBuffer(marshaled)
 	dec := gob.NewDecoder(buf)
 	if err := dec.Decode(result); err != nil {
@@ -42,15 +42,23 @@ func (m *GobMarshaller) Unmarshal(marshaled []byte, result interface{}) error {
 	return nil
 }
 
-// MsgPack
+// Json
 
-type MsgPackMarshaller struct{}
+type JSON struct{}
 
-func NewMsgPackMarshaller() MsgPackMarshaller {
-	return MsgPackMarshaller{}
+func (m JSON) Marshal(value any) ([]byte, error) {
+	return json.Marshal(value)
 }
 
-func (m *MsgPackMarshaller) Marshal(value interface{}) ([]byte, error) {
+func (m JSON) Unmarshal(marshaled []byte, result any) error {
+	return json.Unmarshal(marshaled, result)
+}
+
+// MessagePack
+
+type MessagePack struct{}
+
+func (m MessagePack) Marshal(value any) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := msgpack.NewEncoder(&buf)
 	enc.SetCustomStructTag("json")
@@ -60,7 +68,7 @@ func (m *MsgPackMarshaller) Marshal(value interface{}) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (m *MsgPackMarshaller) Unmarshal(marshaled []byte, result interface{}) error {
+func (m MessagePack) Unmarshal(marshaled []byte, result any) error {
 	buf := bytes.NewBuffer(marshaled)
 	dec := msgpack.NewDecoder(buf)
 	dec.SetCustomStructTag("json")

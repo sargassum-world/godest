@@ -27,7 +27,7 @@ type clientMessage struct {
 type serverMessage struct {
 	Type       string `json:"type,omitempty"`
 	Identifier string `json:"identifier,omitempty"`
-	Message    string `json:"message,omitempty"`
+	Message    any    `json:"message,omitempty"`
 }
 
 // newWelcome creates an Action Cable welcome message.
@@ -61,8 +61,12 @@ func newSubscriptionRejection(identifier string) serverMessage {
 	}
 }
 
+type DataPayload interface {
+	string | []byte
+}
+
 // newData creates an Action Cable data message.
-func newData(identifier, message string) serverMessage {
+func newData[Payload DataPayload](identifier string, message Payload) serverMessage {
 	return serverMessage{
 		Identifier: identifier,
 		Message:    message,

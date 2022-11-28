@@ -45,7 +45,7 @@ func parseStreamName(identifier string) (string, error) {
 // NewChannel checks the identifier with the specified checkers and returns a new Channel instance.
 func NewChannel(
 	identifier string, h *pubsub.Hub[[]Message], subscriber subscriber, sessionID string,
-	checkers ...actioncable.IdentifierChecker,
+	checkers []actioncable.IdentifierChecker,
 ) (*Channel, error) {
 	name, err := parseStreamName(identifier)
 	if err != nil {
@@ -67,7 +67,7 @@ func NewChannel(
 
 // Subscribe handles an Action Cable subscribe command from the client with the provided
 // [actioncable.Subscription].
-func (c *Channel) Subscribe(ctx context.Context, sub actioncable.Subscription) error {
+func (c *Channel) Subscribe(ctx context.Context, sub *actioncable.Subscription) error {
 	if sub.Identifier() != c.identifier {
 		return errors.Errorf(
 			"channel identifier %+v does not match subscription identifier %+v",
@@ -77,7 +77,7 @@ func (c *Channel) Subscribe(ctx context.Context, sub actioncable.Subscription) e
 
 	finished := c.subscriber(
 		ctx, c.streamName, c.sessionID, func(ctx context.Context, rendered string) error {
-			return sub.Send(rendered)
+			return sub.SendText(rendered)
 		},
 	)
 	go func() {
@@ -98,6 +98,6 @@ func NewChannelFactory(
 	b *Broker, sessionID string, checkers ...actioncable.IdentifierChecker,
 ) actioncable.ChannelFactory {
 	return func(identifier string) (actioncable.Channel, error) {
-		return NewChannel(identifier, b.Hub(), b.Subscribe, sessionID, checkers...)
+		return NewChannel(identifier, b.Hub(), b.Subscribe, sessionID, checkers)
 	}
 }
