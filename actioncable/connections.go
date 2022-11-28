@@ -21,6 +21,13 @@ const (
 	ActionCableV1MsgpackSubprotocol = "actioncable-v1-msgpack"
 )
 
+func SupportedSubprotocols() []string {
+	return []string{
+		ActionCableV1JSONSubprotocol,
+		ActionCableV1MsgpackSubprotocol,
+	}
+}
+
 // Error Handling
 
 // isNormalClose checks whether the error indicates a websocket connection closing under ordinary
@@ -95,7 +102,7 @@ func Upgrade(wsc *websocket.Conn, handler Handler, opts ...ConnOption) (conn *Co
 
 	switch subprotocol {
 	default:
-		return nil, errors.Errorf("unsupported subprotocol %s", subprotocol)
+		return nil, errors.Errorf("unsupported websocket subprotocol %s", subprotocol)
 	case ActionCableV1JSONSubprotocol:
 		messageType = websocket.TextMessage
 		marshaler = marshaling.JSON{}
