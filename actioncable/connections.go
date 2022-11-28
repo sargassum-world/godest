@@ -94,7 +94,8 @@ func defaultErrorSanitizer(err error) string {
 	return "server or client error"
 }
 
-// Upgrade upgrades the WebSocket connection to an Action Cable connection.
+// Upgrade upgrades the WebSocket connection to an Action Cable connection. The WebSocket connection
+// should not be written to or read from if the upgrade completes successfully.
 func Upgrade(wsc *websocket.Conn, handler Handler, opts ...ConnOption) (conn *Conn, err error) {
 	subprotocol := wsc.Subprotocol()
 	var marshaler marshaling.Marshaler
@@ -102,7 +103,11 @@ func Upgrade(wsc *websocket.Conn, handler Handler, opts ...ConnOption) (conn *Co
 
 	switch subprotocol {
 	default:
-		return nil, errors.Errorf("unsupported websocket subprotocol %s", subprotocol)
+		// If this error is returned, then the switch statement does not match the list of supported
+		// subprotocols used to instantiate websocket.Upgrader.
+		return nil, errors.Errorf("unsupported negotiated websocket subprotocol %s", subprotocol)
+	case "":
+		return nil, errors.New("unsupported client-requested websocket subprotocol")
 	case ActionCableV1JSONSubprotocol:
 		messageType = websocket.TextMessage
 		marshaler = marshaling.JSON{}
@@ -127,6 +132,8 @@ func Upgrade(wsc *websocket.Conn, handler Handler, opts ...ConnOption) (conn *Co
 	return conn, nil
 }
 
+// Closing
+
 // disconnect cancels all subscriptions and sends an Action Cable disconnect message.
 func (c *Conn) disconnect(serr error, allowReconnect bool) {
 	// Because c.unsubscribers isn't protected by a mutex, the Close method should only be called
@@ -145,15 +152,21 @@ func (c *Conn) disconnect(serr error, allowReconnect bool) {
 	_ = c.writeAsMarshaled(newDisconnect(c.sanitizeError(serr), allowReconnect))
 }
 
-// Close cancels all subscriptions, sends an Action Cable disconnect message, and closes the
+// Close cancels all subscriptions, sends an Action Cable disconnect message and WebSocket close
+// control message (which can be interrupted by canceling the provided context), and closes the
 // WebSocket connection. The Conn should not be used after being closed.
 func (c *Conn) Close(err error) error {
+	// TODO: allow reconnection if we're closing because the server is going down
+	// TODO: test whether Close behaves correctly when we're shutting down the HTTP server
+	c.disconnect(err, false)
 	// We send close messages only as a courtesy; they may fail if the client already closed the
 	// websocket connection by going away, so we don't care about such errors; we need to call the
 	// websocket's Close method regardless.
-	// TODO: is there any situation where we want to allow reconnection?
-	c.disconnect(err, false)
-	_ = c.writeMessage(websocket.CloseMessage, []byte{})
+	_ = c.wsc.WriteControl(
+		websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseGoingAway, "server closing connection"),
+		time.Now().Add(wsWriteWait),
+	)
 
 	close(c.toClient)
 	return errors.Wrap(c.wsc.Close(), "couldn't close websocket")
@@ -271,9 +284,10 @@ func (c *Conn) receiveAll(ctx context.Context) (err error) {
 
 // Sending
 
+const wsWriteWait = 10 * time.Second
+
 // resetWriteDeadline pushes back the write deadline by 10 sec.
 func (c *Conn) resetWriteDeadline() error {
-	const wsWriteWait = 10 * time.Second
 	return errors.Wrap(
 		c.wsc.SetWriteDeadline(time.Now().Add(wsWriteWait)), "couldn't reset write deadline",
 	)
