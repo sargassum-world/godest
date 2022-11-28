@@ -31,7 +31,7 @@ func (s Signer) Check(identifier string) error {
 		return err
 	}
 	if !s.validate(name) {
-		return errors.Errorf("signed channel name %s failed HMAC check", name.Name)
+		return errors.Errorf("signed stream/subchannel name %s failed HMAC check", name.Name)
 	}
 	return nil
 }
@@ -59,7 +59,7 @@ func (s Signer) parseIdentifier(identifier string) (parsed signedName, err error
 	parsed.Name = params.Name
 	parsed.Hash, err = base64.StdEncoding.DecodeString(params.Hash)
 	if err != nil {
-		return signedName{}, errors.Wrap(err, "couldn't base64-decode channel name hash")
+		return signedName{}, errors.Wrap(err, "couldn't base64-decode stream/subchannel name hash")
 	}
 	return parsed, nil
 }
