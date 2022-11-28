@@ -7,6 +7,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/sargassum-world/godest/actioncable"
+	"github.com/sargassum-world/godest/handling"
 	"github.com/sargassum-world/godest/pubsub"
 )
 
@@ -77,7 +78,10 @@ func (c *Channel) Subscribe(ctx context.Context, sub *actioncable.Subscription) 
 
 	finished := c.subscriber(
 		ctx, c.streamName, c.sessionID, func(ctx context.Context, rendered string) error {
-			return sub.SendText(rendered)
+			return errors.Wrap(
+				handling.Except(sub.SendText(ctx, rendered), context.Canceled),
+				"couldn't send turbo streams messages over action cable",
+			)
 		},
 	)
 	go func() {

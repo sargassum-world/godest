@@ -148,6 +148,7 @@ func (c *Conn) Close(err error) error {
 	c.disconnect(err, false)
 	_ = c.writeMessage(websocket.CloseMessage, []byte{})
 
+	close(c.toClient)
 	return errors.Wrap(c.wsc.Close(), "couldn't close websocket")
 }
 
