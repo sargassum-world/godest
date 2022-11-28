@@ -10,68 +10,34 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/sargassum-world/godest/marshaling"
 )
 
-const subprotocol = "actioncable-v1-json"
+// Subprotocols
 
-func Subprotocols() []string {
-	return []string{subprotocol}
-}
+const (
+	ActionCableV1JSONSubprotocol    = "actioncable-v1-json"
+	ActionCableV1MsgpackSubprotocol = "actioncable-v1-msgpack"
+)
 
-// Messages
-
-type serverMessage struct {
-	Type       string `json:"type,omitempty"`
-	Identifier string `json:"identifier,omitempty"`
-	Message    string `json:"message,omitempty"`
-}
-
-type clientMessage struct {
-	Command    string `json:"command"`
-	Identifier string `json:"identifier"`
-	Data       string `json:"data,omitempty"`
-}
-
-func newWelcome() serverMessage {
-	return serverMessage{
-		Type: "welcome",
-	}
-}
-
-func newPing(t time.Time) serverMessage {
-	return serverMessage{
-		Type:    "ping",
-		Message: fmt.Sprintf("%d", t.Unix()),
-	}
-}
-
-func newSubscriptionConfirmation(identifier string) serverMessage {
-	return serverMessage{
-		Type:       "confirm_subscription",
-		Identifier: identifier,
-	}
-}
-
-func newSubscriptionRejection(identifier string) serverMessage {
-	return serverMessage{
-		Type:       "reject_subscription",
-		Identifier: identifier,
-	}
-}
-
-func newData(identifier, message string) serverMessage {
-	return serverMessage{
-		Identifier: identifier,
-		Message:    message,
+func SupportedSubprotocols() []string {
+	return []string{
+		ActionCableV1JSONSubprotocol,
+		ActionCableV1MsgpackSubprotocol,
 	}
 }
 
 // Error Handling
 
+// isNormalClose checks whether the error indicates a websocket connection closing under ordinary
+// conditions.
 func isNormalClose(err error) bool {
 	return websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway)
 }
 
+// filterNormalClose returns the underlying error when the wrapped error is from a websocket
+// connection closing under ordinary conditions.
 func filterNormalClose(underlying error, wrapped error) error {
 	if isNormalClose(underlying) {
 		// Return the raw error so the Serve function can act differently on a normal close
@@ -80,43 +46,42 @@ func filterNormalClose(underlying error, wrapped error) error {
 	return wrapped
 }
 
-// Connection
+type ErrorSanitizer func(err error) string
 
-type (
-	SubscriptionHandler func(ctx context.Context, sub Subscription) (unsubscriber func(), err error)
-	ActionHandler       func(ctx context.Context, identifier, data string) error
-	ErrorSanitizer      func(err error) string
-)
+// Message Handling
 
-type Conn struct {
-	wsc           *websocket.Conn
-	toClient      chan serverMessage
-	sh            SubscriptionHandler
-	ah            ActionHandler
-	unsubscribers map[string]func()
-	sanitizeError ErrorSanitizer
+// Handler handles Action Cable channel subscription and channel action messages.
+type Handler interface {
+	HandleSubscription(ctx context.Context, sub *Subscription) error
+	HandleAction(ctx context.Context, identifier, data string) error
 }
 
+// Conn
+
+// Conn represents a server-side Action Cable connection.
+type Conn struct {
+	wsc             *websocket.Conn
+	toClient        chan serverMessage
+	h               Handler
+	unsubscribers   map[string]func()
+	sanitizeError   ErrorSanitizer
+	subprotocol     string
+	marshaledWSType int
+	marshaler       marshaling.Marshaler
+}
+
+// ConnOption modifies a [Conn]. For use with [Upgrade].
 type ConnOption func(conn *Conn)
 
-func WithSubscriptionHandler(h SubscriptionHandler) ConnOption {
-	return func(conn *Conn) {
-		conn.sh = h
-	}
-}
-
-func WithActionHandler(h ActionHandler) ConnOption {
-	return func(conn *Conn) {
-		conn.ah = h
-	}
-}
-
+// WithErrorSanitizer creates a [ConnOption] to set the Conn's error sanitizer, which processes
+// errors to avoid leaking sensitive information in server logs.
 func WithErrorSanitizer(f ErrorSanitizer) ConnOption {
 	return func(conn *Conn) {
 		conn.sanitizeError = f
 	}
 }
 
+// defaultErrorSanitizer replaces errors with a generic message.
 func defaultErrorSanitizer(err error) string {
 	if err == nil {
 		return ""
@@ -129,25 +94,47 @@ func defaultErrorSanitizer(err error) string {
 	return "server or client error"
 }
 
-func Upgrade(wsc *websocket.Conn, opts ...ConnOption) (conn *Conn) {
+// Upgrade upgrades the WebSocket connection to an Action Cable connection. The WebSocket connection
+// should not be written to or read from if the upgrade completes successfully.
+func Upgrade(wsc *websocket.Conn, handler Handler, opts ...ConnOption) (conn *Conn, err error) {
+	subprotocol := wsc.Subprotocol()
+	var marshaler marshaling.Marshaler
+	var messageType int
+
+	switch subprotocol {
+	default:
+		// If this error is returned, then the switch statement does not match the list of supported
+		// subprotocols used to instantiate websocket.Upgrader.
+		return nil, errors.Errorf("unsupported negotiated websocket subprotocol %s", subprotocol)
+	case "":
+		return nil, errors.New("unsupported client-requested websocket subprotocol")
+	case ActionCableV1JSONSubprotocol:
+		messageType = websocket.TextMessage
+		marshaler = marshaling.JSON{}
+	case ActionCableV1MsgpackSubprotocol:
+		messageType = websocket.BinaryMessage
+		marshaler = marshaling.MessagePack{}
+	}
+	// TODO: check wsc for its subprotocol so we can handle different encodings
 	conn = &Conn{
-		wsc:      wsc,
-		toClient: make(chan serverMessage),
-		sh: func(ctx context.Context, _ Subscription) (func(), error) {
-			return nil, errors.New("No subscription handler registered")
-		},
-		ah: func(ctx context.Context, _, _ string) error {
-			return errors.New("No action handler registered")
-		},
-		sanitizeError: defaultErrorSanitizer,
-		unsubscribers: make(map[string]func()),
+		wsc:             wsc,
+		toClient:        make(chan serverMessage),
+		h:               handler,
+		sanitizeError:   defaultErrorSanitizer,
+		unsubscribers:   make(map[string]func()),
+		subprotocol:     subprotocol,
+		marshaledWSType: messageType,
+		marshaler:       marshaler,
 	}
 	for _, opt := range opts {
 		opt(conn)
 	}
-	return conn
+	return conn, nil
 }
 
+// Closing
+
+// disconnect cancels all subscriptions and sends an Action Cable disconnect message.
 func (c *Conn) disconnect(serr error, allowReconnect bool) {
 	// Because c.unsubscribers isn't protected by a mutex, the Close method should only be called
 	// after the Serve method has completed.
@@ -162,53 +149,59 @@ func (c *Conn) disconnect(serr error, allowReconnect bool) {
 	// We send close messages only as a courtesy; they may fail if the client already closed the
 	// websocket connection by going away, so we don't care about such errors; we need to call the
 	// websocket's Close method regardless.
-	_ = c.sendJSON(newDisconnect(c.sanitizeError(serr), allowReconnect))
+	_ = c.writeAsMarshaled(newDisconnect(c.sanitizeError(serr), allowReconnect))
 }
 
+// Close cancels all subscriptions, sends an Action Cable disconnect message and WebSocket close
+// control message (which can be interrupted by canceling the provided context), and closes the
+// WebSocket connection. The Conn should not be used after being closed.
 func (c *Conn) Close(err error) error {
+	// TODO: allow reconnection if we're closing because the server is going down
+	// TODO: test whether Close behaves correctly when we're shutting down the HTTP server
+	c.disconnect(err, false)
 	// We send close messages only as a courtesy; they may fail if the client already closed the
 	// websocket connection by going away, so we don't care about such errors; we need to call the
 	// websocket's Close method regardless.
-	// TODO: is there any situation where we want to allow reconnection?
-	c.disconnect(err, false)
-	_ = c.sendMessage(websocket.CloseMessage, []byte{})
+	_ = c.wsc.WriteControl(
+		websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseGoingAway, "server closing connection"),
+		time.Now().Add(wsWriteWait),
+	)
 
+	close(c.toClient)
 	return errors.Wrap(c.wsc.Close(), "couldn't close websocket")
 }
 
 // Receiving
 
-const (
-	wsPongWait = 60 * time.Second
+// wsPongWait is the WebSocket connection read timeout duration.
+const wsPongWait = 60 * time.Second
 
-	subscribeCommand   = "subscribe"
-	unsubscribeCommand = "unsubscribe"
-	actionCommand      = "message"
-)
-
+// subscribe processes an Action Cable subscribe command.
 func (c *Conn) subscribe(ctx context.Context, identifier string) error {
 	if _, ok := c.unsubscribers[identifier]; ok {
+		// the subscriber already has a subscription, so just confirm it again.
 		c.toClient <- newSubscriptionConfirmation(identifier)
 		return nil
 	}
 
-	unsubscriber, err := c.sh(ctx, Subscription{
-		identifier: identifier,
-		toClient:   c.toClient,
-	})
-	if err != nil {
+	cctx, cancel := context.WithCancel(ctx)
+	if err := c.h.HandleSubscription(
+		cctx, &Subscription{
+			identifier: identifier,
+			toClient:   c.toClient,
+		},
+	); err != nil {
 		c.toClient <- newSubscriptionRejection(identifier)
+		cancel()
 		return errors.Wrap(err, "subscribe command handler encountered error")
 	}
-	if unsubscriber == nil {
-		c.toClient <- newSubscriptionRejection(identifier)
-		return nil
-	}
-	c.unsubscribers[identifier] = unsubscriber
+	c.unsubscribers[identifier] = cancel
 	c.toClient <- newSubscriptionConfirmation(identifier)
 	return nil
 }
 
+// receive processes an Action Cable command.
 func (c *Conn) receive(ctx context.Context, command clientMessage) error {
 	switch command.Command {
 	default:
@@ -223,13 +216,31 @@ func (c *Conn) receive(ctx context.Context, command clientMessage) error {
 		unsubscriber()
 		delete(c.unsubscribers, command.Identifier)
 	case actionCommand:
-		if err := c.ah(ctx, command.Identifier, command.Data); err != nil {
+		if err := c.h.HandleAction(ctx, command.Identifier, command.Data); err != nil {
 			return errors.Wrap(err, "action command handler encountered error")
 		}
 	}
 	return nil
 }
 
+// readAsMarshaled reads a value from a marshaled string or bytes.
+func (c *Conn) readAsMarshaled(result any) error {
+	messageType, marshaled, err := c.wsc.ReadMessage()
+	if err != nil {
+		return filterNormalClose(err, errors.Wrap(err, "couldn't read websocket message"))
+	}
+	if messageType != c.marshaledWSType {
+		return errors.Errorf(
+			"unexpected websocket message type %d (expected %d)", messageType, c.marshaledWSType,
+		)
+	}
+	if uerr := c.marshaler.Unmarshal(marshaled, result); uerr != nil {
+		return errors.Wrap(uerr, "couldn't unmarshal websocket message")
+	}
+	return nil
+}
+
+// receiveAll processes WebSocket pongs and Action Cable commands.
 func (c *Conn) receiveAll(ctx context.Context) (err error) {
 	if err = c.wsc.SetReadDeadline(time.Now().Add(wsPongWait)); err != nil {
 		return errors.Wrap(err, "couldn't set read deadline")
@@ -242,11 +253,11 @@ func (c *Conn) receiveAll(ctx context.Context) (err error) {
 
 	for {
 		var command clientMessage
-		received := make(chan interface{})
+		received := make(chan struct{})
 		go func() {
 			// ReadJSON blocks for a while due to websocket read timeout, but we don't want it to delay
 			// context cancelation so we launch it and synchronize with a closable channel
-			err = c.wsc.ReadJSON(&command)
+			err = c.readAsMarshaled(&command) // FIXME: possible data race on err? If so, synchronize!
 			close(received)
 		}()
 		select {
@@ -259,7 +270,7 @@ func (c *Conn) receiveAll(ctx context.Context) (err error) {
 			return ctx.Err()
 		case <-received:
 			if err != nil {
-				return filterNormalClose(err, errors.Wrap(err, "couldn't parse client message as JSON"))
+				return filterNormalClose(err, errors.Wrap(err, "couldn't unmarshal client message"))
 			}
 			if err = ctx.Err(); err != nil {
 				return err
@@ -273,27 +284,37 @@ func (c *Conn) receiveAll(ctx context.Context) (err error) {
 
 // Sending
 
+const wsWriteWait = 10 * time.Second
+
+// resetWriteDeadline pushes back the write deadline by 10 sec.
 func (c *Conn) resetWriteDeadline() error {
-	const wsWriteWait = 10 * time.Second
 	return errors.Wrap(
 		c.wsc.SetWriteDeadline(time.Now().Add(wsWriteWait)), "couldn't reset write deadline",
 	)
 }
 
-func (c *Conn) sendMessage(messageType int, data []byte) error {
+// writeMessage sends binary data as a WebSocket message.
+func (c *Conn) writeMessage(messageType int, data []byte) error {
 	if err := c.resetWriteDeadline(); err != nil {
 		return err
 	}
-	return c.wsc.WriteMessage(messageType, data)
+	return errors.Wrap(
+		c.wsc.WriteMessage(messageType, data), "couldn't write data over websocket connection",
+	)
 }
 
-func (c *Conn) sendJSON(v interface{}) error {
-	if err := c.resetWriteDeadline(); err != nil {
-		return err
+// writeAsMarshaled sends a value as a marshaled string or bytes.
+func (c *Conn) writeAsMarshaled(v any) error {
+	marshaled, err := c.marshaler.Marshal(v)
+	if err != nil {
+		return errors.Wrap(err, "couldn't marshal data to write over websocket connection")
 	}
-	return c.wsc.WriteJSON(v)
+
+	return c.writeMessage(c.marshaledWSType, marshaled)
 }
 
+// sendAll sends all WebSocket pings, Action Cable handshakes and pings, and Action Cable messages
+// from the toClient queue.
 func (c *Conn) sendAll(ctx context.Context) (err error) {
 	const (
 		wsPingFraction  = 9
@@ -301,16 +322,14 @@ func (c *Conn) sendAll(ctx context.Context) (err error) {
 		cablePingPeriod = 3 * time.Second
 	)
 	wsPingTicker := time.NewTicker(wsPingPeriod)
+	defer wsPingTicker.Stop()
 	cablePingTicker := time.NewTicker(cablePingPeriod)
-	defer func() {
-		wsPingTicker.Stop()
-		cablePingTicker.Stop()
-	}()
+	defer cablePingTicker.Stop()
 
 	if err = c.resetWriteDeadline(); err != nil {
 		return err
 	}
-	if err = c.wsc.WriteJSON(newWelcome()); err != nil {
+	if err = c.writeAsMarshaled(newWelcome()); err != nil {
 		return errors.Wrap(err, "couldn't send welcome message for Action Cable handshake")
 	}
 
@@ -323,7 +342,7 @@ func (c *Conn) sendAll(ctx context.Context) (err error) {
 				// Context was also canceled, it should have priority
 				return err
 			}
-			if err = c.sendMessage(
+			if err = c.writeMessage(
 				websocket.PingMessage, []byte(fmt.Sprintf("%d", time.Now().Unix())),
 			); err != nil {
 				return filterNormalClose(err, errors.Wrap(err, "couldn't send websocket ping"))
@@ -333,7 +352,7 @@ func (c *Conn) sendAll(ctx context.Context) (err error) {
 				// Context was also canceled, it should have priority
 				return err
 			}
-			if err = c.sendJSON(newPing(time.Now())); err != nil {
+			if err = c.writeAsMarshaled(newPing(time.Now())); err != nil {
 				return filterNormalClose(err, errors.Wrap(err, "couldn't send Action Cable ping"))
 			}
 		case message := <-c.toClient:
@@ -341,7 +360,7 @@ func (c *Conn) sendAll(ctx context.Context) (err error) {
 				// Context was also canceled, it should have priority
 				return err
 			}
-			if err = c.sendJSON(message); err != nil {
+			if err = c.writeAsMarshaled(message); err != nil {
 				return filterNormalClose(err, errors.Wrap(
 					err, "couldn't send Action Cable server message for client",
 				))
@@ -352,20 +371,7 @@ func (c *Conn) sendAll(ctx context.Context) (err error) {
 
 // Serving
 
-type disconnectMessage struct {
-	Type      string `json:"type"`
-	Reason    string `json:"reason,omitempty"`
-	Reconnect bool   `json:"reconnect,omitempty"`
-}
-
-func newDisconnect(reason string, allowReconnect bool) disconnectMessage {
-	return disconnectMessage{
-		Type:      "disconnect",
-		Reason:    reason,
-		Reconnect: allowReconnect,
-	}
-}
-
+// Serve processes all WebSocket ping/pong messages and Action Cable messages.
 func (c *Conn) Serve(ctx context.Context) (err error) {
 	eg, egctx := errgroup.WithContext(ctx)
 	eg.Go(func() error {

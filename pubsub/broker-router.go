@@ -3,6 +3,7 @@ package pubsub
 
 // Methods
 
+// Pub-sub broker event methods.
 const (
 	MethodPub     = "PUB"
 	MethodSub     = "SUB"
@@ -64,6 +65,8 @@ func (r *routeMethods[HandlerContext]) get(
 
 // Context
 
+// RouterContext represents the subset of the context of the current pub-sub broker event related
+// to routing events to handlers.
 type RouterContext[HandlerContext Context] struct {
 	path    string
 	pnames  []string
@@ -71,10 +74,12 @@ type RouterContext[HandlerContext Context] struct {
 	handler HandlerFunc[HandlerContext]
 }
 
+// Path returns the registered path for the handler. Analogous to Echo's Context.Path.
 func (c *RouterContext[HandlerContext]) Path() string {
 	return c.path
 }
 
+// Param returns the path parameter value by name. Analogous to Echo's Context.Param.
 func (c *RouterContext[HandlerContext]) Param(name string) string {
 	// Copied from github.com/labstack/echo's context.Param method
 	for i, n := range c.pnames {
@@ -87,10 +92,12 @@ func (c *RouterContext[HandlerContext]) Param(name string) string {
 	return ""
 }
 
+// ParamNames returns the path parameter names. Analogous to Echo's Context.ParamNames.
 func (c *RouterContext[HandlerContext]) ParamNames() []string {
 	return c.pnames
 }
 
+// ParamValues returns the path parameter values. Analogous to Echo's Context.ParamValues.
 func (c *RouterContext[HandlerContext]) ParamValues() []string {
 	return c.pvalues[:len(c.pnames)]
 }
@@ -200,7 +207,8 @@ func (n *node[HandlerContext]) isLeafNode() bool {
 
 // Route
 
-// Route contains a handler and information for matching against requests.
+// Route contains a handler and information for matching against requests. Analogous to Echo's
+// Route.
 type Route struct {
 	Method string `json:"method"`
 	Path   string `json:"path"`
@@ -209,7 +217,7 @@ type Route struct {
 
 // Handler Router
 
-// HandlerRouter is the registry of routes for subscription matching and topic path parameter
+// HandlerRouter is the registry of routes for event handler routing and topic path parameter
 // parsing.
 type HandlerRouter[HandlerContext Context] struct {
 	tree     *node[HandlerContext]
@@ -217,6 +225,7 @@ type HandlerRouter[HandlerContext Context] struct {
 	maxParam *int
 }
 
+// NewHandlerRouter creates a new instance of [HandlerRouter].
 func NewHandlerRouter[HandlerContext Context](maxParam *int) *HandlerRouter[HandlerContext] {
 	return &HandlerRouter[HandlerContext]{
 		tree: &node[HandlerContext]{
@@ -227,6 +236,7 @@ func NewHandlerRouter[HandlerContext Context](maxParam *int) *HandlerRouter[Hand
 	}
 }
 
+// Add registers a new route for a pub-sub broker event method and topic with matching handler.
 func (r *HandlerRouter[HandlerContext]) Add(method, path string, h HandlerFunc[HandlerContext]) {
 	// Copied from github.com/labstack/echo's Router.Add method
 	// Validate path
@@ -418,6 +428,8 @@ func (r *HandlerRouter[HandlerContext]) insert(
 	}
 }
 
+// Find modifies the router context with the results of attempting to match the method and path to a
+// handler.
 func (r *HandlerRouter[HandlerContext]) Find(
 	method, path string, ctx *RouterContext[HandlerContext],
 ) {

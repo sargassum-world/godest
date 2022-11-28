@@ -1,4 +1,4 @@
-package turbostreams
+package actioncable
 
 import (
 	"github.com/pkg/errors"
@@ -6,7 +6,7 @@ import (
 	"github.com/sargassum-world/godest/env"
 )
 
-const envPrefix = "TURBOSTREAMS_"
+const envPrefix = "ACTIONCABLE_"
 
 type SignerConfig struct {
 	HashKey []byte
@@ -16,7 +16,7 @@ func GetSignerConfig() (c SignerConfig, err error) {
 	const hashKeySize = 32
 	c.HashKey, err = env.GetKey(envPrefix+"HASH_KEY", hashKeySize)
 	if err != nil {
-		return SignerConfig{}, errors.Wrap(err, "couldn't make turbo streams name signer config")
+		return SignerConfig{}, errors.Wrap(err, "couldn't make action cable name signer config")
 	}
 
 	return c, nil
