@@ -18,7 +18,7 @@ require (
 	github.com/twmb/murmur3 v1.1.6
 	github.com/vmihailenco/msgpack/v5 v5.3.5
 	golang.org/x/sync v0.1.0
-	zombiezen.com/go/sqlite v0.10.1
+	zombiezen.com/go/sqlite v0.11.0
 )
 
 require (
@@ -31,7 +31,6 @@ require (
 	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/golang/glog v1.0.0 // indirect
 	github.com/google/flatbuffers v22.10.26+incompatible // indirect
-	github.com/google/go-cmp v0.5.9 // indirect
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/klauspost/compress v1.15.12 // indirect
 	github.com/kr/pretty v0.1.0 // indirect
@@ -56,8 +55,8 @@ require (
 	golang.org/x/sys v0.2.0 // indirect
 	golang.org/x/text v0.4.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	modernc.org/libc v1.16.7 // indirect
-	modernc.org/mathutil v1.4.1 // indirect
-	modernc.org/memory v1.1.1 // indirect
-	modernc.org/sqlite v1.17.3 // indirect
+	modernc.org/libc v1.21.5 // indirect
+	modernc.org/mathutil v1.5.0 // indirect
+	modernc.org/memory v1.4.0 // indirect
+	modernc.org/sqlite v1.20.0 // indirect
 )
