@@ -35,10 +35,10 @@ type SqliteStore struct {
 func NewSqliteStore(
 	db *database.DB, absoluteTimeout time.Duration, keyPairs ...[]byte,
 ) *SqliteStore {
-	// TODO: also take a parameter for a function to modify a Session with *sssion.Session.Valuesa,
+	// TODO: also take a parameter for a function to modify a Session with *sssion.Session.Values,
 	// which would enable e.g. storing the user identity in a column rather than an encoded string,
 	// to enable selecting all sessions fo a user
-	// We don't allow specifying the table name programatically (which would require turning our
+	// We don't allow specifying the table name programmatically (which would require turning our
 	// embedded migrations and queries into Go templates to render into sql), because renaming the
 	// table would require its own dedicated migration, and it's too much complexity to deal with that
 	// use case.
@@ -230,6 +230,23 @@ func (ss *SqliteStore) DeleteSession(ctx context.Context, id string) (err error)
 	)
 }
 
+//go:embed queries/delete-sessions-past-creation-timeout.sql
+var rawDeleteOldCreatedSessionsQuery string
+var deleteOldCreatedSessionsQuery string = strings.TrimSpace(rawDeleteOldCreatedSessionsQuery)
+
+func (ss *SqliteStore) DeleteOldCreatedSessions(
+	ctx context.Context, timeout time.Duration, threshold time.Time,
+) (err error) {
+	return errors.Wrapf(
+		ss.db.ExecuteDelete(
+			ctx, deleteOldCreatedSessionsQuery, Session{
+				ExpirationTime: threshold,
+			}.newDeletePastCreationTimeout(timeout),
+		),
+		"couldn't delete sessions which expired before %s", threshold,
+	)
+}
+
 //go:embed queries/delete-sessions-past-expiration.sql
 var rawDeleteExpiredSessionsQuery string
 var deleteExpiredSessionsQuery string = strings.TrimSpace(rawDeleteExpiredSessionsQuery)
@@ -243,14 +260,29 @@ func (ss *SqliteStore) DeleteExpiredSessions(ctx context.Context, threshold time
 	)
 }
 
+func (ss *SqliteStore) Cleanup(ctx context.Context) (done bool, err error) {
+	// This will delete any session based on its absolute timeout at the time of creation, even if the
+	// absolute timeout later increased such that the session's age is greater than the current
+	// timeout.
+	if err := ss.DeleteExpiredSessions(ctx, time.Now()); err != nil {
+		return false, errors.Wrap(err, "couldn't perform periodic deletion of expired sessions")
+	}
+	// This will delete any session based on the current absolute timeout, even if the absolute
+	// timeout was decreased such that current timeout is less than the session's expiration time in
+	// the database.
+	if err := ss.DeleteOldCreatedSessions(ctx, ss.AbsoluteTimeout, time.Now()); err != nil {
+		return false, errors.Wrap(
+			err, "couldn't perform periodic deletion of sessions created a long time ago",
+		)
+	}
+	return false, nil
+}
+
 func (ss *SqliteStore) PeriodicallyCleanup(
 	ctx context.Context, interval time.Duration,
 ) error {
 	return handling.Repeat(ctx, interval, func() (done bool, err error) {
-		return false, errors.Wrap(
-			ss.DeleteExpiredSessions(ctx, time.Now()),
-			"couldn't perform periodic deletion of expired sessions",
-		)
+		return ss.Cleanup(ctx)
 	})
 }
 

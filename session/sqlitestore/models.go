@@ -40,6 +40,13 @@ func (s Session) newDelete() map[string]interface{} {
 	}
 }
 
+func (s Session) newDeletePastCreationTimeout(timeout time.Duration) map[string]interface{} {
+	return map[string]interface{}{
+		"$expiration_timeout":        timeout.Milliseconds(),
+		"$expiration_time_threshold": s.ExpirationTime.UnixMilli(),
+	}
+}
+
 func (s Session) newDeletePastExpiration() map[string]interface{} {
 	return map[string]interface{}{
 		"$expiration_time_threshold": s.ExpirationTime.UnixMilli(),

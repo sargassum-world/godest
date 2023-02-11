@@ -12,13 +12,27 @@ func Repeat(ctx context.Context, interval time.Duration, f Worker) error {
 	if interval == 0 {
 		return repeatInstantly(ctx, f)
 	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	return repeatDelayed(ctx, interval, f)
+}
+
+func RepeatImmediate(ctx context.Context, interval time.Duration, f Worker) error {
+	done, err := f()
+	if err != nil {
+		return err
+	}
+	if done {
+		return nil
+	}
+
+	return Repeat(ctx, interval, f)
+}
+
+func repeatInstantly(ctx context.Context, f Worker) error {
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-ticker.C:
+		default:
 			if err := ctx.Err(); err != nil {
 				// Context was also canceled and it should have priority
 				return err
@@ -35,12 +49,14 @@ func Repeat(ctx context.Context, interval time.Duration, f Worker) error {
 	}
 }
 
-func repeatInstantly(ctx context.Context, f Worker) error {
+func repeatDelayed(ctx context.Context, interval time.Duration, f Worker) error {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		default:
+		case <-ticker.C:
 			if err := ctx.Err(); err != nil {
 				// Context was also canceled and it should have priority
 				return err
