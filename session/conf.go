@@ -69,7 +69,7 @@ func GetConfig() (c Config, err error) {
 }
 
 func getTimeouts() (t Timeouts, err error) {
-	const defaultAbsolute = 60 * 24 * 7 * 24 // default: 1 week
+	const defaultAbsolute = 60 * 24 * 7 // default: 1 week
 	rawAbsolute, err := env.GetInt64(envPrefix+"TIMEOUTS_ABSOLUTE", defaultAbsolute)
 	if err != nil {
 		return Timeouts{}, errors.Wrap(err, "couldn't make absolute timeout config")

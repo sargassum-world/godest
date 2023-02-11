@@ -21,7 +21,7 @@ type Config struct {
 func GetConfig() (c Config, err error) {
 	c.URI = env.GetString(envPrefix+"URI", "file:db.sqlite3")
 
-	c.Flags = sqlite.OpenURI | sqlite.OpenNoMutex | sqlite.OpenSharedCache | sqlite.OpenWAL
+	c.Flags = sqlite.OpenURI | sqlite.OpenSharedCache | sqlite.OpenWAL
 	memory, err := env.GetBool(envPrefix + "MEMORY")
 	if err != nil {
 		return Config{}, errors.Wrap(err, "couldn't make SQLite in-memory config")
