@@ -20,9 +20,7 @@ new(message) := {
 is_error(result) if {
 	result.type == "error"
 	some "message", _ in result
-} else = false if {
-	true
-}
+} else = false
 
 # METADATA
 # description: |

@@ -12,11 +12,11 @@ import (
 
 // Context
 
-type brokerContext = pubsub.BrokerContext[*Context, Message]
+type BrokerContext = pubsub.BrokerContext[*Context, Message]
 
 // Context represents the context of the current Turbo Streams pub-sub broker event.
 type Context struct {
-	*brokerContext
+	*BrokerContext
 
 	sessionID string
 	messages  []Message
@@ -131,7 +131,7 @@ func (b *Broker) triggerMsg(
 	ctx context.Context, streamName, sessionID string, messages []Message,
 ) (rendered string, err error) {
 	c := &Context{
-		brokerContext: b.broker.NewBrokerContext(ctx, MethodMsg, streamName),
+		BrokerContext: b.broker.NewBrokerContext(ctx, MethodMsg, streamName),
 		sessionID:     sessionID,
 		messages:      messages,
 		rendered:      &bytes.Buffer{},
@@ -160,7 +160,7 @@ func (b *Broker) Subscribe(
 		ctx, streamName,
 		func(c *pubsub.BrokerContext[*Context, Message]) *Context {
 			return &Context{
-				brokerContext: c,
+				BrokerContext: c,
 				sessionID:     sessionID,
 			}
 		},
@@ -186,7 +186,7 @@ func (b *Broker) Subscribe(
 func (b *Broker) Serve(ctx context.Context) error {
 	return b.broker.Serve(ctx, func(c *pubsub.BrokerContext[*Context, Message]) *Context {
 		return &Context{
-			brokerContext: c,
+			BrokerContext: c,
 		}
 	})
 }
