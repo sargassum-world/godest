@@ -1,6 +1,6 @@
 module github.com/sargassum-world/godest/tools
 
-go 1.19
+go 1.25
 
 require (
 	github.com/golangci/golangci-lint v1.51.1
