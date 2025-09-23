@@ -351,11 +351,16 @@ func (tr TemplateRenderer) MustHave(templateNames ...string) {
 }
 
 func (tr TemplateRenderer) ShouldHave(templateNames ...string) error {
+	all, err := tr.getAll()
+	if err != nil {
+		return err
+	}
 	for _, templateName := range templateNames {
-		if tr.allTemplates.Lookup(templateName) == nil {
+		if all.Lookup(templateName) == nil {
 			return errors.Errorf("couldn't find required template %s", templateName)
 		}
-		if filterPageTemplate(templateName) {
+		// Note: if there are no fingerprints at all, don't look for fingerprints!
+		if tr.fingerprints != nil && filterPageTemplate(templateName) {
 			if err := tr.fingerprints.shouldHaveForPage(templateName); err != nil {
 				return err
 			}
