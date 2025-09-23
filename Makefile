@@ -17,7 +17,7 @@ clean: ## remove files created during build pipeline
 .PHONY: install
 install: ## go install tools
 	$(call print-target)
-	cd tools && go install $(shell cd tools && go list -f '{{ join .Imports " " }}' -tags=tools)
+	go install tool
 
 .PHONY: generate
 generate: ## go generate
@@ -33,14 +33,14 @@ vet: ## go vet
 fmt: ## go fmt
 	$(call print-target)
 	go fmt ./...
-	opa fmt -w .
+	go tool opa fmt -w .
 
 .PHONY: lint
 lint: ## golangci-lint
 	$(call print-target)
-	golangci-lint run
-	opa fmt --fail -l .
-	opa check --strict `find . -type f -name "*.rego"`
+	go tool golangci-lint run
+	go tool opa fmt --fail -l .
+	go tool opa check --strict `find . -type f -name "*.rego"`
 
 .PHONY: test
 test: ## go test with race detector and code covarage
@@ -52,7 +52,6 @@ test: ## go test with race detector and code covarage
 mod-tidy: ## go mod tidy
 	$(call print-target)
 	go mod tidy
-	cd tools && go mod tidy
 
 .PHONY: diff
 diff: ## git diff
@@ -64,7 +63,7 @@ diff: ## git diff
 release: ## goreleaser --rm-dist
 release: install
 	$(call print-target)
-	goreleaser --rm-dist
+	go tool goreleaser --rm-dist
 
 .PHONY: go-clean
 go-clean: ## go clean build, test and modules caches
