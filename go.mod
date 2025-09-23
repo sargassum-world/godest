@@ -1,6 +1,6 @@
 module github.com/sargassum-world/godest
 
-go 1.25
+go 1.24
 
 require (
 	github.com/alexedwards/argon2id v0.0.0-20211130144151-3585854a6387
