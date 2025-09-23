@@ -15,7 +15,7 @@ jobs:
         os: 
           - ubuntu-latest
           # - macos-latest # apparently incompatible with open-policy-agent/setup-opa
-          - windows-latest
+          # - windows-latest # Windows slows GitHub Actions checks down too much
     runs-on: ${{ matrix.os }}
     defaults:
       run:
