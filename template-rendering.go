@@ -19,23 +19,187 @@ import (
 	"github.com/sargassum-world/godest/turbostreams"
 )
 
+// RenderData
+
 type RenderData struct {
 	Meta struct {
 		Path       string
 		RequestURI string
 	}
-	Inlines interface{}
-	Data    interface{}
-	Auth    interface{}
+	Inlines any
+	Data    any
+	Auth    any
 }
 
+// TemplateRenderer
+
 type TemplateRenderer struct {
+	templatesFS fs.FS
+	funcs       []template.FuncMap
+	inlines     any
+
+	// Pre-cached data:
 	allTemplates         *template.Template
 	partialTemplates     map[string]*template.Template
 	pageTemplates        map[string]*template.Template
 	turboStreamsTemplate *template.Template
-	inlines              interface{}
-	fingerprints         fingerprints
+	fingerprints         *fingerprints
+}
+
+// NewTemplateRenderer pre-loads and pre-compiles the templates from the filesystem specified by the
+// [Embeds], and then initializes a TemplateRenderer from those templates.
+func NewTemplateRenderer(
+	e Embeds, inlines any, funcs ...template.FuncMap,
+) (tr TemplateRenderer, err error) {
+	tr.templatesFS = e.TemplatesFS
+	tr.funcs = funcs
+	tr.inlines = inlines
+	tr.fingerprints = &fingerprints{}
+
+	if tr.allTemplates, err = tr.getAll(); err != nil {
+		return TemplateRenderer{}, err
+	}
+	if tr.pageTemplates, err = tr.getPages(); err != nil {
+		return TemplateRenderer{}, err
+	}
+	if tr.partialTemplates, err = tr.getPartials(); err != nil {
+		return TemplateRenderer{}, err
+	}
+	if tr.turboStreamsTemplate, err = tr.getTurboStreams(); err != nil {
+		return TemplateRenderer{}, err
+	}
+
+	if tr.fingerprints.app, err = e.computeAppFingerprint(); err != nil {
+		return TemplateRenderer{}, errors.Wrap(err, "couldn't compute fingerprint for app")
+	}
+	if tr.fingerprints.page, err = e.computePageFingerprints(); err != nil {
+		return TemplateRenderer{}, errors.Wrap(
+			err, "couldn't compute fingerprint for page/module templates",
+		)
+	}
+
+	return tr, nil
+}
+
+// NewLazyTemplateRenderer initializes a TemplateRenderer which lazily loads and compiles a template
+// upon each render.
+func NewLazyTemplateRenderer(
+	e Embeds, inlines any, funcs ...template.FuncMap,
+) (tr TemplateRenderer, err error) {
+	tr.templatesFS = e.TemplatesFS
+	tr.funcs = funcs
+	tr.inlines = inlines
+
+	return tr, nil
+}
+
+func (tr TemplateRenderer) NewRenderData(
+	r *http.Request, data any, auth any,
+) RenderData {
+	return RenderData{
+		Meta: struct {
+			Path       string
+			RequestURI string
+		}{
+			Path:       r.URL.Path,
+			RequestURI: r.URL.RequestURI(),
+		},
+		Inlines: tr.inlines,
+		Data:    data,
+		Auth:    auth,
+	}
+}
+
+func (tr TemplateRenderer) CacheablePage(
+	w http.ResponseWriter, r *http.Request,
+	templateName string, templateData any, authData any,
+	headerOptions ...HeaderOption,
+) error {
+	if tr.fingerprints == nil {
+		return errors.New("CacheablePage is not yet supported in lazy TemplateRenderer instances!")
+	}
+
+	type EtagInputs struct {
+		Data any
+		Auth any
+	}
+	if noContent, err := tr.fingerprints.setAndCheckEtag(w, r, templateName, EtagInputs{
+		Data: templateData,
+		Auth: authData,
+	}); noContent || (err != nil) {
+		return err
+	}
+	return tr.Page(w, r, http.StatusOK, templateName, templateData, authData, headerOptions...)
+}
+
+func (tr TemplateRenderer) Page(
+	w http.ResponseWriter, r *http.Request,
+	status int, templateName string, templateData any, authData any,
+	headerOptions ...HeaderOption,
+) error {
+	// This is basically a reimplementation of the echo.Context.Render method, but without requiring
+	// an echo.Context to be provided
+	buf := new(bytes.Buffer)
+	tmpl, err := tr.getPage(templateName)
+	if err != nil {
+		return err
+	}
+	if err := tmpl.ExecuteTemplate(
+		buf, templateName, tr.NewRenderData(r, templateData, authData),
+	); err != nil {
+		return errors.Wrapf(err, "couldn't execute page template %s", templateName)
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	for _, headerOption := range headerOptions {
+		headerOption(w.Header())
+	}
+	w.WriteHeader(status)
+	_, werr := w.Write(buf.Bytes())
+	return werr
+}
+
+func (tr TemplateRenderer) getPage(pageName string) (page *template.Template, err error) {
+	pageTemplates := tr.pageTemplates
+	if pageTemplates == nil {
+		if pageTemplates, err = tr.getPages(); err != nil {
+			return nil, err
+		}
+	}
+	page, ok := pageTemplates[pageName]
+	if !ok {
+		return nil, errors.Errorf("page template %s not found", pageName)
+	}
+	return page, nil
+}
+
+func (tr TemplateRenderer) getPages() (pages map[string]*template.Template, err error) {
+	pages = tr.pageTemplates
+	if pages == nil {
+		all, err := tr.getAll()
+		if err != nil {
+			return nil, err
+		}
+		pages, err = instantiateTemplates(tr.templatesFS, all, filterPageTemplate)
+		if err != nil {
+			return nil, errors.Wrap(err, "couldn't instantiate page templates")
+		}
+	}
+	return pages, nil
+}
+
+func (tr TemplateRenderer) getAll() (all *template.Template, err error) {
+	all = tr.allTemplates
+	if all == nil {
+		all = template.New("App")
+		for _, f := range tr.funcs {
+			all = all.Funcs(f)
+		}
+		if all, err = parseFS(all, tr.templatesFS, "**/*"+templateFileExt); err != nil {
+			return nil, errors.Wrap(err, "couldn't load templates from filesystem")
+		}
+	}
+	return all, nil
 }
 
 func instantiateTemplates(
@@ -59,158 +223,24 @@ func instantiateTemplates(
 	return templates, nil
 }
 
-func instantiateTurboStreamsTemplate(
-	allTemplates *template.Template, turboStreamsTemplate string,
-) (t *template.Template, err error) {
-	all, err := allTemplates.Clone()
-	if err != nil {
-		return nil, errors.Wrap(err, "couldn't clone root template set")
-	}
-	t, err = all.Parse(turboStreamsTemplate)
-	if err != nil {
-		return nil, errors.Wrap(err, "couldn't parse Turbo Streams template")
-	}
-	return t, nil
-}
+// TemplateRenderer: Turbo Streams support
 
-func NewTemplateRenderer(
-	e Embeds, inlines interface{}, funcs ...template.FuncMap,
-) (tr TemplateRenderer, err error) {
-	tmpl := template.New("App")
-	for _, f := range funcs {
-		tmpl = tmpl.Funcs(f)
-	}
-	tr.allTemplates, err = parseFS(tmpl, e.TemplatesFS, "**/*"+templateFileExt)
-	if err != nil {
-		return TemplateRenderer{}, errors.Wrap(err, "couldn't load templates from filesystem")
-	}
-
-	tr.pageTemplates, err = instantiateTemplates(
-		e.TemplatesFS, tr.allTemplates, filterPageTemplate,
-	)
-	if err != nil {
-		return TemplateRenderer{}, errors.Wrap(err, "couldn't instantiate page templates")
-	}
-	tr.partialTemplates, err = instantiateTemplates(
-		e.TemplatesFS, tr.allTemplates, filterPartialTemplate,
-	)
-	if err != nil {
-		return TemplateRenderer{}, errors.Wrap(err, "couldn't instantiate partial templates")
-	}
-	tr.turboStreamsTemplate, err = instantiateTurboStreamsTemplate(
-		tr.allTemplates, turbostreams.Template,
-	)
-	if err != nil {
-		return TemplateRenderer{}, errors.Wrap(err, "couldn't instantiate Turbo Streams template")
-	}
-
-	tr.inlines = inlines
-	if tr.fingerprints.app, err = e.computeAppFingerprint(); err != nil {
-		return TemplateRenderer{}, errors.Wrap(err, "couldn't compute fingerprint for app")
-	}
-	if tr.fingerprints.page, err = e.computePageFingerprints(); err != nil {
-		return TemplateRenderer{}, errors.Wrap(
-			err, "couldn't compute fingerprint for page/module templates",
-		)
-	}
-
-	return tr, nil
-}
-
-func (tr TemplateRenderer) MustHave(templateNames ...string) {
-	for _, templateName := range templateNames {
-		if tr.allTemplates.Lookup(templateName) == nil {
-			panic(errors.Errorf("couldn't find required template %s", templateName))
-		}
-		if filterPageTemplate(templateName) {
-			tr.fingerprints.mustHaveForPage(templateName)
-		}
-	}
-}
-
-func (tr TemplateRenderer) newRenderData(
-	r *http.Request, data interface{}, auth interface{},
-) RenderData {
-	return RenderData{
-		Meta: struct {
-			Path       string
-			RequestURI string
-		}{
-			Path:       r.URL.Path,
-			RequestURI: r.URL.RequestURI(),
-		},
-		Inlines: tr.inlines,
-		Data:    data,
-		Auth:    auth,
-	}
-}
-
-func (tr TemplateRenderer) Page(
-	w http.ResponseWriter, r *http.Request,
-	status int, templateName string, templateData interface{}, authData interface{},
-	headerOptions ...HeaderOption,
+func (tr TemplateRenderer) TurboStream(
+	w http.ResponseWriter, messages ...turbostreams.Message,
 ) error {
-	// This is basically a reimplementation of the echo.Context.Render method, but without requiring
-	// an echo.Context to be provided
-	buf := new(bytes.Buffer)
-	tmpl, ok := tr.pageTemplates[templateName]
-	if !ok {
-		return errors.Errorf("page template %s not found", templateName)
-	}
-	if err := tmpl.ExecuteTemplate(
-		buf, templateName, tr.newRenderData(r, templateData, authData),
-	); err != nil {
-		return errors.Wrapf(err, "couldn't execute page template %s", templateName)
-	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	for _, headerOption := range headerOptions {
-		headerOption(w.Header())
-	}
-	w.WriteHeader(status)
-	_, werr := w.Write(buf.Bytes())
-	return werr
-}
-
-func (tr TemplateRenderer) CacheablePage(
-	w http.ResponseWriter, r *http.Request,
-	templateName string, templateData interface{}, authData interface{},
-	headerOptions ...HeaderOption,
-) error {
-	type EtagInputs struct {
-		Data interface{}
-		Auth interface{}
-	}
-	if noContent, err := tr.fingerprints.setAndCheckEtag(w, r, templateName, EtagInputs{
-		Data: templateData,
-		Auth: authData,
-	}); noContent || (err != nil) {
-		return err
-	}
-	return tr.Page(w, r, http.StatusOK, templateName, templateData, authData, headerOptions...)
-}
-
-func (tr TemplateRenderer) WritePartial(
-	w io.Writer, partialName string, partialData interface{},
-) error {
-	tmpl, ok := tr.partialTemplates[partialName]
-	if !ok {
-		return errors.Errorf("partial template %s not found", partialName)
-	}
-	if err := tmpl.ExecuteTemplate(w, partialName, partialData); err != nil {
-		return errors.Wrapf(err, "couldn't execute partial template %s", partialName)
-	}
-	return nil
-}
-
-type renderedStreamMessage struct {
-	Action   turbostreams.Action
-	Targets  string
-	Target   string
-	Rendered template.HTML
+	w.Header().Set("Content-Type", turbostreams.ContentType+"; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	return tr.WriteTurboStream(w, messages...)
 }
 
 func (tr TemplateRenderer) WriteTurboStream(w io.Writer, messages ...turbostreams.Message) error {
+	type renderedStreamMessage struct {
+		Action   turbostreams.Action
+		Targets  string
+		Target   string
+		Rendered template.HTML
+	}
+
 	rendered := make([]renderedStreamMessage, len(messages))
 	for i, message := range messages {
 		buf := new(bytes.Buffer)
@@ -229,7 +259,11 @@ func (tr TemplateRenderer) WriteTurboStream(w io.Writer, messages ...turbostream
 	}
 
 	buf := new(bytes.Buffer)
-	if err := tr.turboStreamsTemplate.Execute(buf, rendered); err != nil {
+	turboStreamsTemplate, err := tr.getTurboStreams()
+	if err != nil {
+		return err
+	}
+	if err := turboStreamsTemplate.Execute(buf, rendered); err != nil {
 		return errors.Wrap(err, "couldn't execute Turbo Streams message template")
 	}
 
@@ -237,10 +271,95 @@ func (tr TemplateRenderer) WriteTurboStream(w io.Writer, messages ...turbostream
 	return werr
 }
 
-func (tr TemplateRenderer) TurboStream(
-	w http.ResponseWriter, messages ...turbostreams.Message,
+func (tr TemplateRenderer) getTurboStreams() (turboStreams *template.Template, err error) {
+	turboStreams = tr.turboStreamsTemplate
+	if turboStreams == nil {
+		all, err := tr.getAll()
+		if err != nil {
+			return nil, err
+		}
+		turboStreams, err = instantiateTurboStreamsTemplate(all, turbostreams.Template)
+		if err != nil {
+			return nil, errors.Wrap(err, "couldn't instantiate Turbo Streams template")
+		}
+	}
+	return turboStreams, nil
+}
+
+func instantiateTurboStreamsTemplate(
+	allTemplates *template.Template, turboStreamsTemplate string,
+) (t *template.Template, err error) {
+	all, err := allTemplates.Clone()
+	if err != nil {
+		return nil, errors.Wrap(err, "couldn't clone root template set")
+	}
+	t, err = all.Parse(turboStreamsTemplate)
+	if err != nil {
+		return nil, errors.Wrap(err, "couldn't parse Turbo Streams template")
+	}
+	return t, nil
+}
+
+func (tr TemplateRenderer) WritePartial(
+	w io.Writer, partialName string, partialData any,
 ) error {
-	w.Header().Set("Content-Type", turbostreams.ContentType+"; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	return tr.WriteTurboStream(w, messages...)
+	tmpl, err := tr.getPartial(partialName)
+	if err != nil {
+		return err
+	}
+	if err := tmpl.ExecuteTemplate(w, partialName, partialData); err != nil {
+		return errors.Wrapf(err, "couldn't execute partial template %s", partialName)
+	}
+	return nil
+}
+
+func (tr TemplateRenderer) getPartial(partialName string) (partial *template.Template, err error) {
+	partialTemplates := tr.partialTemplates
+	if partialTemplates == nil {
+		if partialTemplates, err = tr.getPartials(); err != nil {
+			return nil, err
+		}
+	}
+	tmpl, ok := partialTemplates[partialName]
+	if !ok {
+		return nil, errors.Errorf("partial template %s not found", partialName)
+	}
+	return tmpl, nil
+}
+
+func (tr TemplateRenderer) getPartials() (partials map[string]*template.Template, err error) {
+	partials = tr.partialTemplates
+	if partials == nil {
+		all, err := tr.getAll()
+		if err != nil {
+			return nil, err
+		}
+		partials, err = instantiateTemplates(tr.templatesFS, all, filterPartialTemplate)
+		if err != nil {
+			return nil, errors.Wrap(err, "couldn't instantiate partial templates")
+		}
+	}
+	return partials, nil
+}
+
+// TemplateRenderer: template existence checks
+
+func (tr TemplateRenderer) MustHave(templateNames ...string) {
+	if err := tr.ShouldHave(templateNames...); err != nil {
+		panic(err)
+	}
+}
+
+func (tr TemplateRenderer) ShouldHave(templateNames ...string) error {
+	for _, templateName := range templateNames {
+		if tr.allTemplates.Lookup(templateName) == nil {
+			return errors.Errorf("couldn't find required template %s", templateName)
+		}
+		if filterPageTemplate(templateName) {
+			if err := tr.fingerprints.shouldHaveForPage(templateName); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

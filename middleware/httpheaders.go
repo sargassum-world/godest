@@ -59,7 +59,7 @@ func RequireContentTypes(contentTypes ...string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			r := c.Request()
-			if !(r.Method == http.MethodPut || r.Method == http.MethodPost || r.Method == http.MethodPatch) {
+			if r.Method != http.MethodPut && r.Method != http.MethodPost && r.Method != http.MethodPatch {
 				return next(c)
 			}
 
