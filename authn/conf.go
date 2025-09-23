@@ -2,6 +2,7 @@ package authn
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/alexedwards/argon2id"
 	"github.com/pkg/errors"
@@ -50,17 +51,26 @@ func getArgon2idParams() (argon2id.Params, error) {
 		return argon2id.Params{}, errors.Wrap(err, "couldn't make memorySize config")
 	}
 	memorySize *= 1024
+	if memorySize > math.MaxUint32 {
+		return argon2id.Params{}, errors.Errorf("%sARGON2ID_M %d is too large!", envPrefix, memorySize)
+	}
 
 	var defaultIterations uint64 = 1 // default: 1 iteration over the memory
 	iterations, err := env.GetUint64(envPrefix+"ARGON2ID_T", defaultIterations)
 	if err != nil {
 		return argon2id.Params{}, errors.Wrap(err, "couldn't make iterations config")
 	}
+	if iterations > math.MaxUint32 {
+		return argon2id.Params{}, errors.Errorf("%sARGON2ID_T %d is too large!", envPrefix, iterations)
+	}
 
 	var defaultParallelism uint64 = 2 // default: 2 threads/lanes
 	parallelism, err := env.GetUint64(envPrefix+"ARGON2ID_P", defaultParallelism)
 	if err != nil {
 		return argon2id.Params{}, errors.Wrap(err, "couldn't make parallelism config")
+	}
+	if parallelism > math.MaxUint8 {
+		return argon2id.Params{}, errors.Errorf("%sARGON2ID_P %d is too large!", envPrefix, parallelism)
 	}
 
 	var defaultSaltLength uint32 = 16 // default: 16 bytes

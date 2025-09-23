@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/open-policy-agent/opa/rego"
+	"github.com/open-policy-agent/opa/rego" //nolint:staticcheck // we'll stick with OPA v0.x for now
 	"github.com/pkg/errors"
 )
 

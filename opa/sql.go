@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/open-policy-agent/opa/ast"
+	"github.com/open-policy-agent/opa/ast" //nolint:staticcheck // we'll stick with OPA v0.x for now
 	"github.com/pkg/errors"
 )
 

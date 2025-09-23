@@ -469,7 +469,7 @@ func (r *HandlerRouter[HandlerContext]) Find(
 		if fromKind == staticKind {
 			// when backtracking is done from static kind block we did not change search so nothing to
 			// restore
-			return
+			return nextNodeKind, valid
 		}
 
 		// restore search to value it was before we move to current node we are backtracking from.
@@ -484,7 +484,7 @@ func (r *HandlerRouter[HandlerContext]) Find(
 			paramValues[paramIndex] = ""
 		}
 		search = path[searchIndex:]
-		return
+		return nextNodeKind, valid
 	}
 
 	// Router tree is implemented by longest common prefix array (LCP array)
