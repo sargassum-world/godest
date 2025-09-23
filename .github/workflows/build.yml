@@ -15,7 +15,7 @@ jobs:
       matrix:
         os: 
           - ubuntu-latest
-          # - macos-latest # apparently incompatible with open-policy-agent/setup-opa
+          - macos-latest
           # - windows-latest # Windows slows GitHub Actions checks down too much
     runs-on: ${{ matrix.os }}
     defaults:
@@ -28,10 +28,6 @@ jobs:
         uses: magnetikonline/action-golang-cache@v5
         with:
           go-version-file: go.mod
-
-      - uses: open-policy-agent/setup-opa@v2
-        with:
-          version: 0.48
 
       - name: Build
         run: make ci
