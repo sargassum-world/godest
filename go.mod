@@ -1,6 +1,6 @@
 module github.com/sargassum-world/godest
 
-go 1.19
+go 1.23.0
 
 require (
 	github.com/alexedwards/argon2id v0.0.0-20211130144151-3585854a6387
@@ -17,7 +17,7 @@ require (
 	github.com/quasoft/memstore v0.0.0-20191010062613-2bce066d2b0b
 	github.com/twmb/murmur3 v1.1.6
 	github.com/vmihailenco/msgpack/v5 v5.3.5
-	golang.org/x/sync v0.1.0
+	golang.org/x/sync v0.12.0
 	zombiezen.com/go/sqlite v0.12.0
 )
 
@@ -48,10 +48,10 @@ require (
 	github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415 // indirect
 	github.com/yashtewari/glob-intersection v0.1.0 // indirect
 	go.opencensus.io v0.24.0 // indirect
-	golang.org/x/crypto v0.6.0 // indirect
-	golang.org/x/net v0.6.0 // indirect
-	golang.org/x/sys v0.5.0 // indirect
-	golang.org/x/text v0.7.0 // indirect
+	golang.org/x/crypto v0.36.0 // indirect
+	golang.org/x/net v0.38.0 // indirect
+	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	modernc.org/libc v1.21.5 // indirect
 	modernc.org/mathutil v1.5.0 // indirect
