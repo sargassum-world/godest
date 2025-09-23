@@ -2,7 +2,7 @@
 
 .PHONY: dev
 dev: ## dev build
-dev: clean install generate vet fmt lint test mod-tidy
+dev: clean install generate vet fmt spell lint test mod-tidy
 
 .PHONY: ci
 ci: ## CI build
@@ -34,6 +34,11 @@ fmt: ## go fmt
 	$(call print-target)
 	go fmt ./...
 	go tool opa fmt -w .
+
+.PHONY: spell
+spell: ##misspell
+	$(call print-target)
+	go tool misspell -error -locale=US -w **.md
 
 .PHONY: lint
 lint: ## golangci-lint
