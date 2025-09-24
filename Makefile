@@ -32,7 +32,7 @@ vet: ## go vet
 .PHONY: fmt
 fmt: ## go fmt
 	$(call print-target)
-	go fmt ./...
+	go tool golangci-lint fmt
 	go tool opa fmt -w .
 
 .PHONY: spell

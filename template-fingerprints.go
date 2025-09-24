@@ -14,31 +14,8 @@ type fingerprints struct {
 	page map[string]string
 }
 
-func (f fingerprints) getEtagSegments(templateName string) ([]string, error) {
-	if templateName == "" {
-		return []string{f.app}, nil
-	}
-
-	pageFingerprint, ok := f.page[templateName]
-	if !ok {
-		return []string{f.app}, errors.Errorf(
-			"couldn't find page fingerprint for template %s", templateName,
-		)
-	}
-
-	return []string{f.app, pageFingerprint}, nil
-}
-
-func (f fingerprints) mustHaveForPage(templateName string) {
-	if _, err := f.getEtagSegments(templateName); err != nil {
-		panic(errors.Wrapf(
-			err, "couldn't find template etag segments for page template %s", templateName,
-		))
-	}
-}
-
 func (f fingerprints) setAndCheckEtag(
-	w http.ResponseWriter, r *http.Request, templateName string, data interface{},
+	w http.ResponseWriter, r *http.Request, templateName string, data any,
 ) (noContent bool, err error) {
 	// Look up data-independent etag segments
 	templateEtagSegments, err := f.getEtagSegments(templateName)
@@ -64,4 +41,28 @@ func (f fingerprints) setAndCheckEtag(
 		w.WriteHeader(http.StatusNotModified)
 	}
 	return noContent, nil
+}
+
+func (f fingerprints) getEtagSegments(templateName string) ([]string, error) {
+	if templateName == "" {
+		return []string{f.app}, nil
+	}
+
+	pageFingerprint, ok := f.page[templateName]
+	if !ok {
+		return []string{f.app}, errors.Errorf(
+			"couldn't find page fingerprint for template %s", templateName,
+		)
+	}
+
+	return []string{f.app, pageFingerprint}, nil
+}
+
+func (f fingerprints) shouldHaveForPage(templateName string) error {
+	if _, err := f.getEtagSegments(templateName); err != nil {
+		return errors.Wrapf(
+			err, "couldn't find template etag segments for page template %s", templateName,
+		)
+	}
+	return nil
 }

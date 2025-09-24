@@ -15,7 +15,7 @@ jobs:
       matrix:
         os: 
           - ubuntu-latest
-          # - macos-latest # apparently incompatible with open-policy-agent/setup-opa
+          - macos-latest
           # - windows-latest # Windows slows GitHub Actions checks down too much
     runs-on: ${{ matrix.os }}
     defaults:
@@ -29,26 +29,17 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: open-policy-agent/setup-opa@v2
-        with:
-          version: 0.48
-
       - name: Build
         run: make ci
+
       - name: Upload coverage
         uses: actions/upload-artifact@v4
         with:
-          name: coverage
+          name: coverage-${{ matrix.os }}
           path: coverage.*
-
-      - name: Upload dist
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5.5.1
         with:
-          file: ./coverage.out
+          files: ./coverage.out
           flags: ${{ runner.os }}
