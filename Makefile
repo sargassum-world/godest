@@ -65,10 +65,10 @@ diff: ## git diff
 	RES=$$(git status --porcelain) ; if [ -n "$$RES" ]; then echo $$RES && exit 1 ; fi
 
 .PHONY: release
-release: ## goreleaser --rm-dist
+release: ## goreleaser --clean
 release: install
 	$(call print-target)
-	go tool goreleaser --rm-dist
+	go tool goreleaser --clean
 
 .PHONY: go-clean
 go-clean: ## go clean build, test and modules caches
