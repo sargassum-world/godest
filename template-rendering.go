@@ -34,9 +34,9 @@ type RenderData struct {
 // TemplateRenderer
 
 type TemplateRenderer struct {
-	templatesFS fs.FS
-	funcs       []template.FuncMap
-	inlines     any
+	embeds  Embeds
+	funcs   []template.FuncMap
+	inlines any
 
 	// Pre-cached data:
 	allTemplates         *template.Template
@@ -51,7 +51,7 @@ type TemplateRenderer struct {
 func NewTemplateRenderer(
 	e Embeds, inlines any, funcs ...template.FuncMap,
 ) (tr TemplateRenderer, err error) {
-	tr.templatesFS = e.TemplatesFS
+	tr.embeds = e
 	tr.funcs = funcs
 	tr.inlines = inlines
 	tr.fingerprints = &fingerprints{}
@@ -68,14 +68,8 @@ func NewTemplateRenderer(
 	if tr.turboStreamsTemplate, err = tr.getTurboStreams(); err != nil {
 		return TemplateRenderer{}, err
 	}
-
-	if tr.fingerprints.app, err = e.computeAppFingerprint(); err != nil {
-		return TemplateRenderer{}, errors.Wrap(err, "couldn't compute fingerprint for app")
-	}
-	if tr.fingerprints.page, err = e.computePageFingerprints(); err != nil {
-		return TemplateRenderer{}, errors.Wrap(
-			err, "couldn't compute fingerprint for page/module templates",
-		)
+	if tr.fingerprints, err = tr.getFingerprints(); err != nil {
+		return TemplateRenderer{}, err
 	}
 
 	return tr, nil
@@ -86,7 +80,7 @@ func NewTemplateRenderer(
 func NewLazyTemplateRenderer(
 	e Embeds, inlines any, funcs ...template.FuncMap,
 ) (tr TemplateRenderer, err error) {
-	tr.templatesFS = e.TemplatesFS
+	tr.embeds = e
 	tr.funcs = funcs
 	tr.inlines = inlines
 
@@ -115,21 +109,36 @@ func (tr TemplateRenderer) CacheablePage(
 	templateName string, templateData any, authData any,
 	headerOptions ...HeaderOption,
 ) error {
-	if tr.fingerprints == nil {
-		return errors.New("CacheablePage is not yet supported in lazy TemplateRenderer instances!")
+	fingerprints, err := tr.getFingerprints()
+	if err != nil {
+		return err
 	}
 
 	type EtagInputs struct {
 		Data any
 		Auth any
 	}
-	if noContent, err := tr.fingerprints.setAndCheckEtag(w, r, templateName, EtagInputs{
+	if noContent, err := fingerprints.setAndCheckEtag(w, r, templateName, EtagInputs{
 		Data: templateData,
 		Auth: authData,
 	}); noContent || (err != nil) {
 		return err
 	}
 	return tr.Page(w, r, http.StatusOK, templateName, templateData, authData, headerOptions...)
+}
+
+func (tr TemplateRenderer) getFingerprints() (f *fingerprints, err error) {
+	f = tr.fingerprints
+	if f == nil {
+		f = &fingerprints{}
+		if f.app, err = tr.embeds.computeAppFingerprint(); err != nil {
+			return nil, errors.Wrap(err, "couldn't compute fingerprint for app")
+		}
+		if f.page, err = tr.embeds.computePageFingerprints(); err != nil {
+			return nil, errors.Wrap(err, "couldn't compute fingerprint for page/module templates")
+		}
+	}
+	return f, nil
 }
 
 func (tr TemplateRenderer) Page(
@@ -180,7 +189,7 @@ func (tr TemplateRenderer) getPages() (pages map[string]*template.Template, err 
 		if err != nil {
 			return nil, err
 		}
-		pages, err = instantiateTemplates(tr.templatesFS, all, filterPageTemplate)
+		pages, err = instantiateTemplates(tr.embeds.TemplatesFS, all, filterPageTemplate)
 		if err != nil {
 			return nil, errors.Wrap(err, "couldn't instantiate page templates")
 		}
@@ -195,7 +204,7 @@ func (tr TemplateRenderer) getAll() (all *template.Template, err error) {
 		for _, f := range tr.funcs {
 			all = all.Funcs(f)
 		}
-		if all, err = parseFS(all, tr.templatesFS, "**/*"+templateFileExt); err != nil {
+		if all, err = parseFS(all, tr.embeds.TemplatesFS, "**/*"+templateFileExt); err != nil {
 			return nil, errors.Wrap(err, "couldn't load templates from filesystem")
 		}
 	}
@@ -334,7 +343,7 @@ func (tr TemplateRenderer) getPartials() (partials map[string]*template.Template
 		if err != nil {
 			return nil, err
 		}
-		partials, err = instantiateTemplates(tr.templatesFS, all, filterPartialTemplate)
+		partials, err = instantiateTemplates(tr.embeds.TemplatesFS, all, filterPartialTemplate)
 		if err != nil {
 			return nil, errors.Wrap(err, "couldn't instantiate partial templates")
 		}
@@ -355,13 +364,18 @@ func (tr TemplateRenderer) ShouldHave(templateNames ...string) error {
 	if err != nil {
 		return err
 	}
+	fingerprints, err := tr.getFingerprints()
+	if err != nil {
+		return err
+	}
+
 	for _, templateName := range templateNames {
 		if all.Lookup(templateName) == nil {
 			return errors.Errorf("couldn't find required template %s", templateName)
 		}
 		// Note: if there are no fingerprints at all, don't look for fingerprints!
-		if tr.fingerprints != nil && filterPageTemplate(templateName) {
-			if err := tr.fingerprints.shouldHaveForPage(templateName); err != nil {
+		if fingerprints != nil && filterPageTemplate(templateName) {
+			if err := fingerprints.shouldHaveForPage(templateName); err != nil {
 				return err
 			}
 		}
