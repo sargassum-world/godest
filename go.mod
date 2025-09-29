@@ -3,7 +3,7 @@ module github.com/sargassum-world/godest
 go 1.25.1
 
 require (
-	github.com/alexedwards/argon2id v0.0.0-20211130144151-3585854a6387
+	github.com/alexedwards/argon2id v1.0.0
 	github.com/benbjohnson/hashfs v0.2.1
 	github.com/bmatcuk/doublestar/v4 v4.6.0
 	github.com/dgraph-io/ristretto v0.1.1
