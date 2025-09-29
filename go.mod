@@ -8,8 +8,8 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.6.0
 	github.com/dgraph-io/ristretto v0.1.1
 	github.com/gorilla/csrf v1.7.1
-	github.com/gorilla/securecookie v1.1.1
-	github.com/gorilla/sessions v1.2.1
+	github.com/gorilla/securecookie v1.1.2
+	github.com/gorilla/sessions v1.4.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/labstack/echo/v4 v4.13.4
 	github.com/open-policy-agent/opa v1.4.0
