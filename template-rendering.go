@@ -22,21 +22,25 @@ import (
 // RenderData
 
 type RenderData struct {
-	Meta struct {
-		Path       string
-		RequestURI string
-	}
+	Meta    RenderDataMeta
 	Inlines any
 	Data    any
 	Auth    any
 }
 
+type RenderDataMeta struct {
+	Path       string
+	RequestURI string
+	BasePath   string
+}
+
 // TemplateRenderer
 
 type TemplateRenderer struct {
-	embeds  Embeds
-	funcs   []template.FuncMap
-	inlines any
+	BasePath string
+	embeds   Embeds
+	funcs    []template.FuncMap
+	inlines  any
 
 	// Pre-cached data:
 	allTemplates         *template.Template
@@ -91,12 +95,10 @@ func (tr TemplateRenderer) NewRenderData(
 	r *http.Request, data any, auth any,
 ) RenderData {
 	return RenderData{
-		Meta: struct {
-			Path       string
-			RequestURI string
-		}{
+		Meta: RenderDataMeta{
 			Path:       r.URL.Path,
 			RequestURI: r.URL.RequestURI(),
+			BasePath:   tr.BasePath,
 		},
 		Inlines: tr.inlines,
 		Data:    data,
