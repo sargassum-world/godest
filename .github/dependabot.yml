@@ -9,14 +9,22 @@ updates:
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     commit-message:
       prefix: build(go)
+    groups:
+      go:
+        patterns:
+          - '*'
 
   # Maintain dependencies for GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     commit-message:
       prefix: build(ci)
+    groups:
+      ci:
+        patterns:
+          - '*'

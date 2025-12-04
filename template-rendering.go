@@ -13,6 +13,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 
 	"github.com/pkg/errors"
 
@@ -32,6 +33,40 @@ type RenderDataMeta struct {
 	Path       string
 	RequestURI string
 	BasePath   string
+	Form       FormValues
+}
+
+type FormValues struct {
+	url.Values
+}
+
+func (v FormValues) Clone() FormValues {
+	var newValues FormValues
+	newValues.Values = make(map[string][]string)
+	for key, values := range v.Values {
+		for _, value := range values {
+			newValues.Add(key, value)
+		}
+	}
+	return newValues
+}
+
+func (v FormValues) With(key, value string) FormValues {
+	newValues := v.Clone()
+	newValues.Add(key, value)
+	return newValues
+}
+
+func (v FormValues) WithInstead(key, value string) FormValues {
+	newValues := v.Clone()
+	newValues.Set(key, value)
+	return newValues
+}
+
+func (v FormValues) Without(key string) FormValues {
+	newValues := v.Clone()
+	newValues.Del(key)
+	return newValues
 }
 
 // TemplateRenderer
@@ -99,6 +134,7 @@ func (tr TemplateRenderer) NewRenderData(
 			Path:       r.URL.Path,
 			RequestURI: r.URL.RequestURI(),
 			BasePath:   tr.BasePath,
+			Form:       FormValues{r.Form},
 		},
 		Inlines: tr.inlines,
 		Data:    data,
@@ -155,7 +191,10 @@ func (tr TemplateRenderer) Page(
 	if err != nil {
 		return err
 	}
-	if err := tmpl.ExecuteTemplate(
+	if err = r.ParseForm(); err != nil {
+		return errors.Wrap(err, "couldn't parse URL query values and/or POST/PUT/PATCH request body")
+	}
+	if err = tmpl.ExecuteTemplate(
 		buf, templateName, tr.NewRenderData(r, templateData, authData),
 	); err != nil {
 		return errors.Wrapf(err, "couldn't execute page template %s", templateName)
@@ -166,8 +205,8 @@ func (tr TemplateRenderer) Page(
 		headerOption(w.Header())
 	}
 	w.WriteHeader(status)
-	_, werr := w.Write(buf.Bytes())
-	return werr
+	_, err = w.Write(buf.Bytes())
+	return err
 }
 
 func (tr TemplateRenderer) getPage(pageName string) (page *template.Template, err error) {
