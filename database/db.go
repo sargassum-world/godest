@@ -52,13 +52,21 @@ func NewDB(c Config, opts ...DBOption) (db *DB) {
 }
 
 func (db *DB) Open() (err error) {
-	if db.writePool, err = sqlitex.Open(
-		db.Config.URI, db.Config.Flags|sqlite.OpenReadWrite|sqlite.OpenCreate, db.Config.WritePoolSize,
+	if db.writePool, err = sqlitex.NewPool(
+		db.Config.URI,
+		sqlitex.PoolOptions{
+			Flags:    db.Config.Flags | sqlite.OpenReadWrite | sqlite.OpenCreate,
+			PoolSize: db.Config.WritePoolSize,
+		},
 	); err != nil {
 		return errors.Wrap(err, "couldn't open writer pool")
 	}
-	if db.readPool, err = sqlitex.Open(
-		db.Config.URI, db.Config.Flags|sqlite.OpenReadOnly, db.Config.ReadPoolSize,
+	if db.readPool, err = sqlitex.NewPool(
+		db.Config.URI,
+		sqlitex.PoolOptions{
+			Flags:    db.Config.Flags | sqlite.OpenReadOnly,
+			PoolSize: db.Config.ReadPoolSize,
+		},
 	); err != nil {
 		return errors.Wrap(err, "couldn't open reader pool")
 	}
@@ -117,12 +125,9 @@ func (db *DB) acquire(ctx context.Context, writable bool) (*sqlite.Conn, error) 
 		pool = db.writePool
 	}
 
-	conn := pool.Get(ctx)
-	if conn == nil {
-		if err := ctx.Err(); err != nil {
-			return nil, errors.Wrap(err, "couldn't get connection from pool")
-		}
-		return nil, errors.New("couldn't get connection from a closed pool")
+	conn, err := pool.Take(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "couldn't get connection from pool")
 	}
 	if err := db.prepare(conn, pool); err != nil {
 		pool.Put(conn)
