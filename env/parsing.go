@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/pkg/errors"
 )
@@ -44,7 +46,7 @@ func GetUint64(varName string, defaultValue uint64) (uint64, error) {
 	parsed, err := strconv.ParseUint(value, base, width)
 	if err != nil {
 		return 0, errors.Wrapf(
-			err, "unparseable value %s for uint64 environment variable %s", value, varName,
+			err, "unparsable value %s for uint64 environment variable %s", value, varName,
 		)
 	}
 
@@ -64,7 +66,7 @@ func GetInt64(varName string, defaultValue int64) (int64, error) {
 	parsed, err := strconv.ParseInt(value, base, width)
 	if err != nil {
 		return 0, errors.Wrapf(
-			err, "unparseable value %s for int64 environment variable %s", value, varName,
+			err, "unparsable value %s for int64 environment variable %s", value, varName,
 		)
 	}
 
@@ -81,7 +83,7 @@ func GetFloat32(varName string, defaultValue float32) (float32, error) {
 	parsed, err := strconv.ParseFloat(value, width)
 	if err != nil {
 		return 0, errors.Wrapf(
-			err, "unparseable value %s for float32 environment variable %s", value, varName,
+			err, "unparsable value %s for float32 environment variable %s", value, varName,
 		)
 	}
 
@@ -119,7 +121,7 @@ func GetURLOrigin(varName, defaultValue, defaultScheme string) (*url.URL, error)
 	url, err := GetURL(varName, defaultValue)
 	if err != nil {
 		return nil, errors.Wrapf(
-			err, "unparseable value %s for URL environment variable %s", os.Getenv(varName), varName,
+			err, "unparsable value %s for URL environment variable %s", os.Getenv(varName), varName,
 		)
 	}
 
@@ -159,8 +161,7 @@ func GetKey(varName string, length int) ([]byte, error) {
 	}
 
 	if key == nil {
-		hashKeySize := 32
-		key = GenerateRandomKey(hashKeySize)
+		key = GenerateRandomKey(length)
 		if key == nil {
 			return nil, errors.New("unable to generate a random key")
 		}
@@ -171,4 +172,56 @@ func GetKey(varName string, length int) ([]byte, error) {
 		)
 	}
 	return key, nil
+}
+
+func GetKeyWithFile(varName, filePath string, genLength int) ([]byte, error) {
+	key, err := GetBase64(varName)
+	if err == nil && len(key) > 0 {
+		return key, nil
+	}
+
+	if filePath != "" {
+		if key, err = GetKeyFromFile(filePath); err != nil {
+			fmt.Printf("Warning: couldn't load key for %s from %s: %s\n", varName, filePath, err)
+		}
+	}
+	if len(key) > 0 {
+		fmt.Printf("Using key for %s from %s\n", varName, filePath)
+		return key, nil
+	}
+
+	key = GenerateRandomKey(genLength)
+	if err = SaveKeyToFile(filePath, key); err != nil {
+		fmt.Printf(
+			"Warning: couldn't save newly-generated key for %s to %s: %e\n", varName, filePath, err,
+		)
+		fmt.Printf(
+			"Record this key for future use as %s, preferably in %s: %s\n",
+			varName, filePath, base64.StdEncoding.EncodeToString(key),
+		)
+	}
+	return key, nil
+}
+
+func GetKeyFromFile(path string) (key []byte, err error) {
+	path = filepath.Clean(path)
+	rawFile, err := os.ReadFile(path)
+	if err != nil {
+		return nil, errors.Wrapf(err, "couldn't read keyfile %s", path)
+	}
+	if key, err = base64.StdEncoding.DecodeString(strings.TrimSpace(string(rawFile))); err != nil {
+		return nil, errors.Wrapf(
+			err, "couldn't parse key of length %d from file %s", len(string(rawFile)), path,
+		)
+	}
+	return key, nil
+}
+
+func SaveKeyToFile(path string, key []byte) error {
+	const perm = 0o600 // owner rw, group none, public none
+	path = filepath.Clean(path)
+	if err := os.WriteFile(path, []byte(base64.StdEncoding.EncodeToString(key)), perm); err != nil {
+		return errors.Wrapf(err, "couldn't save key to %s", path)
+	}
+	return nil
 }

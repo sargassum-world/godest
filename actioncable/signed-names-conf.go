@@ -9,14 +9,17 @@ import (
 const envPrefix = "ACTIONCABLE_"
 
 type SignerConfig struct {
+	KeyFile string
 	HashKey []byte
 }
 
 func GetSignerConfig() (c SignerConfig, err error) {
+	const defaultKeyfilePath = "/tmp/action-cable.key"
+	c.KeyFile = env.GetString(envPrefix+"HASH_KEYFILE", defaultKeyfilePath)
+
 	const hashKeySize = 32
-	c.HashKey, err = env.GetKey(envPrefix+"HASH_KEY", hashKeySize)
-	if err != nil {
-		return SignerConfig{}, errors.Wrap(err, "couldn't make action cable name signer config")
+	if c.HashKey, err = env.GetKeyWithFile(envPrefix+"HASH_KEY", c.KeyFile, hashKeySize); err != nil {
+		return c, errors.Wrapf(err, "couldn't get Action Cable key")
 	}
 
 	return c, nil
