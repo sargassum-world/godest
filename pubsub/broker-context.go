@@ -96,6 +96,16 @@ func (c *BrokerContext[HandlerContext, Message]) QueryParams() (url.Values, erro
 	return topic.Query(), nil
 }
 
+// QueryParams returns the first value of the specified query parameter, if the topic can be parsed
+// as a request URI. Analogous to Echo's Context.QueryParam.
+func (c *BrokerContext[HandlerContext, Message]) QueryParam(name string) (string, error) {
+	values, err := c.QueryParams()
+	if err != nil {
+		return "", err
+	}
+	return values.Get(name), nil
+}
+
 // Hub returns the associated broker's pub-sub [Hub].
 func (c *BrokerContext[HandlerContext, Message]) Hub() *Hub[[]Message] {
 	return c.hub
