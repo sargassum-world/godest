@@ -61,8 +61,12 @@ func (db *DB) Open() (err error) {
 	); err != nil {
 		return errors.Wrap(err, "couldn't open writer pool")
 	}
-	if db.readPool, err = sqlitex.Open(
-		db.Config.URI, db.Config.Flags|sqlite.OpenReadOnly, db.Config.ReadPoolSize,
+	if db.readPool, err = sqlitex.NewPool(
+		db.Config.URI,
+		sqlitex.PoolOptions{
+			Flags:    db.Config.Flags | sqlite.OpenReadOnly,
+			PoolSize: db.Config.ReadPoolSize,
+		},
 	); err != nil {
 		return errors.Wrap(err, "couldn't open reader pool")
 	}
