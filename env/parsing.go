@@ -199,8 +199,9 @@ func GetKeyWithFile(varName, filePath string, genLength int) ([]byte, error) {
 			"Record this key for future use as %s, preferably in %s: %s\n",
 			varName, filePath, base64.StdEncoding.EncodeToString(key),
 		)
+		return key, nil
 	}
-	fmt.Printf("Generated and saved random key for %s to %s!", varName, filePath)
+	fmt.Printf("Generated and saved random key for %s to %s!\n", varName, filePath)
 	return key, nil
 }
 
