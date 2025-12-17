@@ -721,8 +721,6 @@ github.com/goreleaser/goreleaser/v2 v2.12.2 h1:uN6deM5AIjkqmizL1cbr6BXtqVghTTVJo
 github.com/goreleaser/goreleaser/v2 v2.12.2/go.mod h1:d+isw6nVghDu/CyKbBv7DQaS6UcVTC4qaQnb/Xco/Tg=
 github.com/goreleaser/nfpm/v2 v2.43.1 h1:y7i+5wlAuBqUEsTL4cZp0FjnNStoA/to9Yuju+MqZpc=
 github.com/goreleaser/nfpm/v2 v2.43.1/go.mod h1:3sDxZIYoMCd3FPa44PuxWnhMtOUHEDBhsmddHAcfySw=
-github.com/gorilla/csrf v1.7.1 h1:Ir3o2c1/Uzj6FBxMlAUB6SivgVMy1ONXwYgXn+/aHPE=
-github.com/gorilla/csrf v1.7.1/go.mod h1:+a/4tCmqhG6/w4oafeAZ9pEa3/NZOWYVbD9fV0FwIQA=
 github.com/gorilla/mux v1.8.1 h1:TuBL49tXwgrFYWhqrNgrUNEY92u81SPhu7sTdzQEiWY=
 github.com/gorilla/mux v1.8.1/go.mod h1:AKf9I4AEqPTmMytcMc0KkNouC66V3BtZ4qD5fmWSiMQ=
 github.com/gorilla/securecookie v1.1.1 h1:miw7JPhV+b/lAHSXz4qd/nN9jRiAFV5FwjeKyCS8BvQ=

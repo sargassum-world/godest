@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/gorilla/csrf"
 	"github.com/gorilla/securecookie"
 	"github.com/gorilla/sessions"
 	"github.com/pkg/errors"
@@ -42,8 +41,4 @@ func (ss *Store) Lookup(id string) (*sessions.Session, error) {
 	r.AddCookie(sessions.NewCookie(ss.Config.CookieName, encrypted, &ss.Config.CookieOptions))
 	sess, err := ss.BackingStore.Get(r, ss.Config.CookieName)
 	return sess, errors.Wrap(err, "couldn't get session without request")
-}
-
-func (ss *Store) NewCSRFMiddleware(opts ...csrf.Option) func(http.Handler) http.Handler {
-	return NewCSRFMiddleware(ss.Config, opts...)
 }

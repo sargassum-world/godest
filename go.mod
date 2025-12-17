@@ -7,7 +7,6 @@ require (
 	github.com/benbjohnson/hashfs v0.2.1
 	github.com/bmatcuk/doublestar/v4 v4.6.0
 	github.com/dgraph-io/ristretto v0.1.1
-	github.com/gorilla/csrf v1.7.1
 	github.com/gorilla/securecookie v1.1.1
 	github.com/gorilla/sessions v1.2.1
 	github.com/gorilla/websocket v1.5.3
