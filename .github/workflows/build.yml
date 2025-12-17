@@ -22,7 +22,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Setup Golang with cache
         uses: magnetikonline/action-golang-cache@v5
@@ -33,7 +33,7 @@ jobs:
         run: make ci
 
       - name: Upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: coverage-${{ matrix.os }}
           path: coverage.*
