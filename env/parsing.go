@@ -200,6 +200,7 @@ func GetKeyWithFile(varName, filePath string, genLength int) ([]byte, error) {
 			varName, filePath, base64.StdEncoding.EncodeToString(key),
 		)
 	}
+	fmt.Printf("Generated and saved random key for %s to %s!", varName, filePath)
 	return key, nil
 }
 
@@ -218,9 +219,15 @@ func GetKeyFromFile(path string) (key []byte, err error) {
 }
 
 func SaveKeyToFile(path string, key []byte) error {
-	const perm = 0o600 // owner rw, group none, public none
+	const dirPerm = 0o755 // owner rwx, group rx, public rx
+	if err := os.MkdirAll(filepath.Dir(path), dirPerm); err != nil {
+		return errors.Wrapf(err, "couldn't create parent directory for file %s", path)
+	}
+	const filePerm = 0o600 // owner rw, group none, public none
 	path = filepath.Clean(path)
-	if err := os.WriteFile(path, []byte(base64.StdEncoding.EncodeToString(key)), perm); err != nil {
+	if err := os.WriteFile(
+		path, []byte(base64.StdEncoding.EncodeToString(key)), filePerm,
+	); err != nil {
 		return errors.Wrapf(err, "couldn't save key to %s", path)
 	}
 	return nil
