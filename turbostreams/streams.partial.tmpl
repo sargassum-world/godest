@@ -3,12 +3,14 @@
     action="{{$renderedStreamMessage.Action}}"
     {{if $renderedStreamMessage.Targets}}
       targets="{{$renderedStreamMessage.Targets}}"
-    {{else}}
+    {{else if gt (len $renderedStreamMessage.Target) 0}}
       target="{{$renderedStreamMessage.Target}}"
     {{end}}
   >
-    <template>
-      {{$renderedStreamMessage.Rendered}}
-    </template>
+    {{if gt (len $renderedStreamMessage.Rendered) 0}}
+      <template>
+        {{$renderedStreamMessage.Rendered}}
+      </template>
+    {{end}}
   </turbo-stream>
 {{end}}

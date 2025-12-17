@@ -126,20 +126,21 @@ func NewLazyTemplateRenderer(
 	return tr, nil
 }
 
-func (tr TemplateRenderer) NewRenderData(
-	r *http.Request, data any, auth any,
-) RenderData {
-	return RenderData{
+func (tr TemplateRenderer) NewRenderData(r *http.Request, data any, auth any) (d RenderData) {
+	d = RenderData{
 		Meta: RenderDataMeta{
-			Path:       r.URL.Path,
-			RequestURI: r.URL.RequestURI(),
-			BasePath:   tr.BasePath,
-			Form:       FormValues{r.Form},
+			BasePath: tr.BasePath,
 		},
 		Inlines: tr.inlines,
 		Data:    data,
 		Auth:    auth,
 	}
+	if r != nil {
+		d.Meta.Path = r.URL.Path
+		d.Meta.RequestURI = r.URL.RequestURI()
+		d.Meta.Form = FormValues{r.Form}
+	}
+	return d
 }
 
 func (tr TemplateRenderer) CacheablePage(
@@ -294,8 +295,17 @@ func (tr TemplateRenderer) WriteTurboStream(w io.Writer, messages ...turbostream
 	rendered := make([]renderedStreamMessage, len(messages))
 	for i, message := range messages {
 		buf := new(bytes.Buffer)
-		if message.Action != turbostreams.ActionRemove {
+		switch message.Action {
+		default:
 			if err := tr.WritePartial(buf, message.Template, message.Data); err != nil {
+				return errors.Wrapf(err, "couldn't execute stream message template %s", message.Template)
+			}
+		case turbostreams.ActionRemove:
+		// No template to render!
+		case turbostreams.ActionRefresh:
+		// No template to render!
+		case turbostreams.ActionReload:
+			if err := tr.WritePage(buf, message.Template, message.Data); err != nil {
 				return errors.Wrapf(err, "couldn't execute stream message template %s", message.Template)
 			}
 		}
@@ -390,6 +400,19 @@ func (tr TemplateRenderer) getPartials() (partials map[string]*template.Template
 		}
 	}
 	return partials, nil
+}
+
+func (tr TemplateRenderer) WritePage(
+	w io.Writer, pageName string, pageData any,
+) error {
+	tmpl, err := tr.getPage(pageName)
+	if err != nil {
+		return err
+	}
+	if err := tmpl.ExecuteTemplate(w, pageName, pageData); err != nil {
+		return errors.Wrapf(err, "couldn't execute page template %s", pageName)
+	}
+	return nil
 }
 
 // TemplateRenderer: template existence checks

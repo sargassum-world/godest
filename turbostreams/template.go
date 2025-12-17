@@ -18,6 +18,12 @@ const (
 	ActionRemove  Action = "remove"
 	ActionBefore  Action = "before"
 	ActionAfter   Action = "after"
+	ActionRefresh Action = "refresh"
+)
+
+// Custom Turbo Stream actions.
+const (
+	ActionReload Action = "reload"
 )
 
 // Message represents a Turbo Stream message which can be rendered to a string using the
@@ -27,7 +33,7 @@ type Message struct {
 	Target   string
 	Targets  string
 	Template string
-	Data     interface{}
+	Data     any
 }
 
 // Template is a Go HTTP template string for rendering [Message] instances as HTML.
