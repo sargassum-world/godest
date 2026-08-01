@@ -16,7 +16,7 @@ require (
 	github.com/quasoft/memstore v0.0.0-20191010062613-2bce066d2b0b
 	github.com/twmb/murmur3 v1.1.8
 	github.com/vmihailenco/msgpack/v5 v5.4.1
-	golang.org/x/sync v0.21.0
+	golang.org/x/sync v0.22.0
 	zombiezen.com/go/sqlite v1.4.2
 )
 
