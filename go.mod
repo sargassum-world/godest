@@ -5,18 +5,18 @@ go 1.26.0
 require (
 	github.com/alexedwards/argon2id v1.0.0
 	github.com/benbjohnson/hashfs v0.2.2
-	github.com/bmatcuk/doublestar/v4 v4.10.0
+	github.com/bmatcuk/doublestar/v4 v4.10.2
 	github.com/dgraph-io/ristretto v0.2.0
 	github.com/gorilla/securecookie v1.1.2
 	github.com/gorilla/sessions v1.4.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
-	github.com/labstack/echo/v4 v4.15.4
+	github.com/labstack/echo/v4 v4.16.0
 	github.com/open-policy-agent/opa v1.20.1
 	github.com/pkg/errors v0.9.1
 	github.com/quasoft/memstore v0.0.0-20191010062613-2bce066d2b0b
-	github.com/twmb/murmur3 v1.1.8
+	github.com/twmb/murmur3 v1.2.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
-	golang.org/x/sync v0.22.0
+	golang.org/x/sync v0.23.0
 	zombiezen.com/go/sqlite v1.4.2
 )
 
